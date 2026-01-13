@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#1a1a2e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="NEURODONE">
+  <meta name="description" content="ADHD-friendly task manager that works with your brain, not against it">
+  
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.svg">
+  <link rel="icon" type="image/svg+xml" href="icon-192.svg">
+  
+  <title>NEURODONE</title>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  
+  <script src="https://js.stripe.com/v3/"></script>
+  
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+    
+    :root {
+      --bg-deep: #0d0d14;
+      --bg-main: #13131f;
+      --bg-card: #1a1a2e;
+      --bg-elevated: #242440;
+      --accent-primary: #7c5cff;
+      --accent-glow: #9d7fff;
+      --accent-success: #4ade80;
+      --accent-warning: #fbbf24;
+      --accent-danger: #f87171;
+      --text-primary: #f8f8fc;
+      --text-secondary: #a0a0b8;
+      --text-muted: #6b6b80;
+      --border-subtle: rgba(255, 255, 255, 0.06);
+      --shadow-glow: 0 0 40px rgba(124, 92, 255, 0.15);
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 20px;
+      --radius-xl: 28px;
+      --font-main: 'Outfit', -apple-system, sans-serif;
+      --font-mono: 'Space Mono', monospace;
+    }
+    
+    html, body, #root {
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+    }
+    
+    body {
+      font-family: var(--font-main);
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--bg-elevated); border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    // ============================================
+    // CONFIG & API
+    // ============================================
+    
+    const API_BASE = ''; // Same domain for Vercel
+    
+    const generateId = () => Math.random().toString(36).substr(2, 9);
+    
+    // Date utilities
+    const formatDate = (date) => new Date(date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    const isToday = (date) => new Date(date).toDateString() === new Date().toDateString();
+    const isTomorrow = (date) => {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      return new Date(date).toDateString() === tomorrow.toDateString();
+    };
+    const getRelativeDay = (date) => {
+      if (isToday(date)) return 'Today';
+      if (isTomorrow(date)) return 'Tomorrow';
+      return formatDate(date);
+    };
+
+    // API Functions
+    const parseTaskWithAPI = async (text, userId) => {
+      try {
+        const response = await fetch(`${API_BASE}/api/parse-task`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, userId }),
+        });
+        
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to parse task');
+        }
+        
+        const { task, rateLimitRemaining } = await response.json();
+        return { task, rateLimitRemaining };
+      } catch (error) {
+        console.error('API Error:', error);
+        // Fallback to local parsing
+        return { task: parseTaskLocally(text), rateLimitRemaining: null };
+      }
+    };
+
+    // Local fallback parser
+    const parseTaskLocally = (voiceText) => {
+      const text = voiceText.toLowerCase();
+      let project = 'Inbox';
+      const forMatch = text.match(/for\s+([a-zA-Z0-9\s]+?)(?:\s+by|\s+due|\s+tomorrow|\s+today|$)/i);
+      if (forMatch) project = forMatch[1].trim();
+      
+      let deadline = new Date();
+      deadline.setHours(17, 0, 0, 0);
+      if (text.includes('tomorrow')) deadline.setDate(deadline.getDate() + 1);
+      else if (text.includes('next week')) deadline.setDate(deadline.getDate() + 7);
+      
+      let taskName = voiceText.replace(/for\s+[a-zA-Z0-9\s]+?\s+(by|due)/gi, '').replace(/by\s+(tomorrow|friday|monday|next week|today)/gi, '').trim();
+      taskName = taskName.charAt(0).toUpperCase() + taskName.slice(1);
+      
+      return {
+        id: generateId(),
+        name: taskName,
+        project: project.charAt(0).toUpperCase() + project.slice(1),
+        deadline: deadline.toISOString(),
+        chunks: [
+          { id: generateId(), name: 'Get started (just 2 min)', completed: false, duration: 2 },
+          { id: generateId(), name: 'Make progress', completed: false, duration: 15 },
+          { id: generateId(), name: 'Wrap it up', completed: false, duration: 10 },
+        ],
+        completed: false,
+        createdAt: new Date().toISOString(),
+      };
+    };
+
+    // Stripe checkout
+    const createCheckoutSession = async (userId, email, plan = 'monthly') => {
+      const response = await fetch(`${API_BASE}/api/create-checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, email, plan }),
+      });
+      const { url } = await response.json();
+      if (url) window.location.href = url;
+    };
+
+    // ============================================
+    // ICONS
+    // ============================================
+    
+    const Icons = {
+      Mic: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>,
+      MicOff: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/></svg>,
+      Plus: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+      Check: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
+      Calendar: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>,
+      List: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>,
+      Folder: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>,
+      Clock: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+      Sparkles: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>,
+      ChevronRight: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>,
+      X: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>,
+      Brain: () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>,
+      User: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+      Settings: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>,
+      Help: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>,
+      CreditCard: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>,
+      Link: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>,
+      Keyboard: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="16" x="2" y="4" rx="2" ry="2"/><path d="M6 8h.001"/><path d="M10 8h.001"/><path d="M14 8h.001"/><path d="M18 8h.001"/><path d="M8 12h.001"/><path d="M12 12h.001"/><path d="M16 12h.001"/><path d="M7 16h10"/></svg>,
+      Crown: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14"/></svg>,
+    };
+
+    // ============================================
+    // COMPONENTS
+    // ============================================
+
+    // Celebration animation
+    const Celebration = ({ show, onComplete }) => {
+      useEffect(() => {
+        if (show) {
+          const timer = setTimeout(onComplete, 2000);
+          return () => clearTimeout(timer);
+        }
+      }, [show, onComplete]);
+      
+      if (!show) return null;
+      
+      return (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(13, 13, 20, 0.9)', zIndex: 1000,
+          animation: 'fadeIn 0.3s ease',
+        }}>
+          <div style={{ textAlign: 'center', animation: 'popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)' }}>
+            <div style={{ fontSize: '64px', marginBottom: '16px' }}>🎉</div>
+            <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--accent-success)' }}>Task Complete!</div>
+            <div style={{ fontSize: '14px', color: 'var(--text-secondary)', marginTop: '8px' }}>You're doing amazing</div>
+          </div>
+        </div>
+      );
+    };
+
+    // Universal Add Button (FAB with options)
+    const UniversalAddButton = ({ onVoiceTask, onOpenTextInput }) => {
+      const [isExpanded, setIsExpanded] = useState(false);
+      const [isRecording, setIsRecording] = useState(false);
+      const [isProcessing, setIsProcessing] = useState(false);
+      const recognitionRef = useRef(null);
+      
+      useEffect(() => {
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+          const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+          recognitionRef.current = new SpeechRecognition();
+          recognitionRef.current.continuous = false;
+          recognitionRef.current.interimResults = false;
+          recognitionRef.current.lang = 'en-US';
+          
+          recognitionRef.current.onresult = async (event) => {
+            const transcript = event.results[0][0].transcript;
+            setIsRecording(false);
+            setIsProcessing(true);
+            
+            try {
+              const { task } = await parseTaskWithAPI(transcript, 'user_demo');
+              onVoiceTask(task);
+            } catch (error) {
+              console.error('Error parsing task:', error);
+            }
+            
+            setIsProcessing(false);
+            setIsExpanded(false);
+          };
+          
+          recognitionRef.current.onerror = () => {
+            setIsRecording(false);
+            setIsProcessing(false);
+          };
+          
+          recognitionRef.current.onend = () => setIsRecording(false);
+        }
+      }, [onVoiceTask]);
+      
+      const startVoice = () => {
+        if (recognitionRef.current) {
+          recognitionRef.current.start();
+          setIsRecording(true);
+        }
+      };
+      
+      const stopVoice = () => {
+        if (recognitionRef.current) {
+          recognitionRef.current.stop();
+          setIsRecording(false);
+        }
+      };
+      
+      return (
+        <div style={{
+          position: 'fixed', bottom: '100px', right: '20px', zIndex: 50,
+          display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '12px',
+        }}>
+          {/* Expanded options */}
+          {isExpanded && !isRecording && !isProcessing && (
+            <>
+              <button
+                onClick={() => { onOpenTextInput(); setIsExpanded(false); }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '10px',
+                  padding: '12px 16px', background: 'var(--bg-card)',
+                  border: '1px solid var(--border-subtle)', borderRadius: '12px',
+                  color: 'var(--text-primary)', fontSize: '14px', fontWeight: '500',
+                  cursor: 'pointer', animation: 'slideUp 0.2s ease',
+                }}
+              >
+                <Icons.Keyboard /> Type task
+              </button>
+              <button
+                onClick={startVoice}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '10px',
+                  padding: '12px 16px', background: 'var(--bg-card)',
+                  border: '1px solid var(--border-subtle)', borderRadius: '12px',
+                  color: 'var(--text-primary)', fontSize: '14px', fontWeight: '500',
+                  cursor: 'pointer', animation: 'slideUp 0.2s ease 0.05s both',
+                }}
+              >
+                <Icons.Mic /> Speak task
+              </button>
+            </>
+          )}
+          
+          {/* Recording state */}
+          {isRecording && (
+            <div style={{
+              padding: '16px 20px', background: 'var(--bg-card)',
+              border: '2px solid var(--accent-danger)', borderRadius: '16px',
+              animation: 'slideUp 0.2s ease', display: 'flex', alignItems: 'center', gap: '12px',
+            }}>
+              <div style={{
+                width: '12px', height: '12px', borderRadius: '50%',
+                background: 'var(--accent-danger)', animation: 'pulse 1s infinite',
+              }} />
+              <span style={{ color: 'var(--text-primary)', fontSize: '14px' }}>Listening...</span>
+              <button onClick={stopVoice} style={{
+                padding: '8px', background: 'var(--accent-danger)',
+                border: 'none', borderRadius: '8px', cursor: 'pointer', color: 'white',
+              }}>
+                <Icons.X />
+              </button>
+            </div>
+          )}
+          
+          {/* Processing state */}
+          {isProcessing && (
+            <div style={{
+              padding: '16px 20px', background: 'var(--bg-card)',
+              border: '1px solid var(--accent-primary)', borderRadius: '16px',
+              display: 'flex', alignItems: 'center', gap: '12px',
+            }}>
+              <div style={{
+                width: '20px', height: '20px', border: '3px solid var(--bg-elevated)',
+                borderTopColor: 'var(--accent-primary)', borderRadius: '50%',
+                animation: 'spin 0.8s linear infinite',
+              }} />
+              <span style={{ color: 'var(--text-primary)', fontSize: '14px' }}>AI is thinking...</span>
+            </div>
+          )}
+          
+          {/* Main FAB */}
+          {!isRecording && !isProcessing && (
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
+              style={{
+                width: '64px', height: '64px', borderRadius: '20px', border: 'none',
+                background: isExpanded ? 'var(--bg-elevated)' : 'linear-gradient(135deg, var(--accent-primary), var(--accent-glow))',
+                color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: isExpanded ? 'none' : 'var(--shadow-glow)',
+                transition: 'all 0.3s ease',
+                transform: isExpanded ? 'rotate(45deg)' : 'rotate(0deg)',
+              }}
+            >
+              <Icons.Plus />
+            </button>
+          )}
+        </div>
+      );
+    };
+
+    // Task Chunk Item
+    const ChunkItem = ({ chunk, onToggle }) => (
+      <div
+        onClick={() => onToggle(chunk.id)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '12px', padding: '12px',
+          background: chunk.completed ? 'rgba(74, 222, 128, 0.1)' : 'var(--bg-main)',
+          borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+          transition: 'all 0.2s ease', opacity: chunk.completed ? 0.7 : 1,
+        }}
+      >
+        <div style={{
+          width: '24px', height: '24px', borderRadius: '50%',
+          border: chunk.completed ? 'none' : '2px solid var(--text-muted)',
+          background: chunk.completed ? 'var(--accent-success)' : 'transparent',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        }}>
+          {chunk.completed && <Icons.Check />}
+        </div>
+        <div style={{ flex: 1, fontSize: '14px', color: chunk.completed ? 'var(--text-muted)' : 'var(--text-primary)', textDecoration: chunk.completed ? 'line-through' : 'none' }}>
+          {chunk.name}
+        </div>
+        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+          {chunk.duration}m
+        </div>
+      </div>
+    );
+
+    // Task Card
+    const TaskCard = ({ task, onToggleChunk, onComplete }) => {
+      const [isExpanded, setIsExpanded] = useState(false);
+      const completedChunks = task.chunks.filter(c => c.completed).length;
+      const progress = (completedChunks / task.chunks.length) * 100;
+      const remainingTime = task.chunks.filter(c => !c.completed).reduce((sum, c) => sum + c.duration, 0);
+      
+      const handleChunkToggle = (chunkId) => {
+        onToggleChunk(task.id, chunkId);
+        const updatedChunks = task.chunks.map(c => c.id === chunkId ? { ...c, completed: !c.completed } : c);
+        if (updatedChunks.every(c => c.completed)) setTimeout(() => onComplete(task.id), 300);
+      };
+      
+      return (
+        <div style={{
+          background: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', padding: '20px',
+          marginBottom: '12px', border: '1px solid var(--border-subtle)',
+          transition: 'all 0.3s ease', animation: 'slideUp 0.4s ease',
+        }}>
+          <div onClick={() => setIsExpanded(!isExpanded)} style={{ cursor: 'pointer' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '11px', fontWeight: '600', color: 'var(--accent-primary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>
+                  {task.project}
+                </div>
+                <div style={{ fontSize: '16px', fontWeight: '500', color: 'var(--text-primary)', lineHeight: 1.4 }}>
+                  {task.name}
+                </div>
+              </div>
+              <div style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s ease', color: 'var(--text-muted)' }}>
+                <Icons.ChevronRight />
+              </div>
+            </div>
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><Icons.Calendar />{getRelativeDay(task.deadline)}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><Icons.Clock />{remainingTime}m left</div>
+              <div style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: '12px', color: progress === 100 ? 'var(--accent-success)' : 'var(--text-muted)' }}>
+                {completedChunks}/{task.chunks.length}
+              </div>
+            </div>
+            
+            <div style={{ marginTop: '12px', height: '4px', background: 'var(--bg-elevated)', borderRadius: '2px', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${progress}%`, background: progress === 100 ? 'var(--accent-success)' : 'linear-gradient(90deg, var(--accent-primary), var(--accent-glow))', borderRadius: '2px', transition: 'width 0.3s ease' }} />
+            </div>
+          </div>
+          
+          {isExpanded && (
+            <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px', animation: 'fadeIn 0.3s ease' }}>
+              <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Icons.Sparkles />AI-Chunked Steps
+              </div>
+              {task.chunks.map((chunk) => (
+                <ChunkItem key={chunk.id} chunk={chunk} onToggle={() => handleChunkToggle(chunk.id)} />
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // Calendar View
+    const CalendarView = ({ tasks, selectedDate, onDateSelect }) => {
+      const getDaysOfWeek = () => {
+        const days = [];
+        const today = new Date();
+        const startOfWeek = new Date(today);
+        startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+        for (let i = 0; i < 7; i++) {
+          const day = new Date(startOfWeek);
+          day.setDate(day.getDate() + i);
+          days.push(day);
+        }
+        return days;
+      };
+      
+      const days = getDaysOfWeek();
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      return (
+        <div style={{ marginBottom: '24px' }}>
+          <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '8px' }}>
+            {days.map((day, index) => {
+              const isSelected = selectedDate && day.toDateString() === selectedDate.toDateString();
+              const isCurrentDay = day.toDateString() === today.toDateString();
+              const dayTasks = tasks.filter(t => new Date(t.deadline).toDateString() === day.toDateString());
+              
+              return (
+                <button
+                  key={index}
+                  onClick={() => onDateSelect(day)}
+                  style={{
+                    flex: '1', minWidth: '48px', padding: '12px 8px',
+                    background: isSelected ? 'linear-gradient(135deg, var(--accent-primary), var(--accent-glow))' : isCurrentDay ? 'var(--bg-elevated)' : 'var(--bg-card)',
+                    border: isCurrentDay && !isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                    borderRadius: 'var(--radius-md)', cursor: 'pointer',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px',
+                  }}
+                >
+                  <div style={{ fontSize: '11px', fontWeight: '500', color: isSelected ? 'white' : 'var(--text-muted)', textTransform: 'uppercase' }}>
+                    {day.toLocaleDateString('en-US', { weekday: 'short' })}
+                  </div>
+                  <div style={{ fontSize: '18px', fontWeight: '600', color: isSelected ? 'white' : 'var(--text-primary)' }}>
+                    {day.getDate()}
+                  </div>
+                  {dayTasks.length > 0 && (
+                    <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: isSelected ? 'white' : 'var(--accent-warning)' }} />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      );
+    };
+
+    // Quick Add Modal (Text input)
+    const QuickAddModal = ({ isOpen, onClose, onAdd, prefilledDate }) => {
+      const [taskName, setTaskName] = useState('');
+      const [project, setProject] = useState('');
+      const [isProcessing, setIsProcessing] = useState(false);
+      const inputRef = useRef(null);
+      
+      useEffect(() => {
+        if (isOpen && inputRef.current) inputRef.current.focus();
+      }, [isOpen]);
+      
+      if (!isOpen) return null;
+      
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!taskName.trim()) return;
+        
+        setIsProcessing(true);
+        try {
+          const { task } = await parseTaskWithAPI(
+            `${taskName}${project ? ` for ${project}` : ''}`,
+            'user_demo'
+          );
+          if (prefilledDate) task.deadline = prefilledDate.toISOString();
+          onAdd(task);
+          setTaskName('');
+          setProject('');
+          onClose();
+        } catch (error) {
+          console.error(error);
+        }
+        setIsProcessing(false);
+      };
+      
+      return (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(13, 13, 20, 0.95)', zIndex: 100, display: 'flex', alignItems: 'flex-end', animation: 'fadeIn 0.2s ease' }}>
+          <div style={{ width: '100%', background: 'var(--bg-card)', borderRadius: 'var(--radius-xl) var(--radius-xl) 0 0', padding: '24px', paddingBottom: '40px', animation: 'slideUp 0.3s ease' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text-primary)' }}>Add Task</h3>
+              <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '8px' }}><Icons.X /></button>
+            </div>
+            
+            <form onSubmit={handleSubmit}>
+              <input
+                ref={inputRef}
+                type="text"
+                value={taskName}
+                onChange={(e) => setTaskName(e.target.value)}
+                placeholder="What needs to be done?"
+                style={{ width: '100%', padding: '16px', fontSize: '16px', background: 'var(--bg-main)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', color: 'var(--text-primary)', marginBottom: '12px', outline: 'none' }}
+              />
+              <input
+                type="text"
+                value={project}
+                onChange={(e) => setProject(e.target.value)}
+                placeholder="Project (optional)"
+                style={{ width: '100%', padding: '16px', fontSize: '16px', background: 'var(--bg-main)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', color: 'var(--text-primary)', marginBottom: '16px', outline: 'none' }}
+              />
+              
+              {prefilledDate && (
+                <div style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Icons.Calendar />Scheduled for {formatDate(prefilledDate)}
+                </div>
+              )}
+              
+              <button
+                type="submit"
+                disabled={!taskName.trim() || isProcessing}
+                style={{
+                  width: '100%', padding: '16px', fontSize: '16px', fontWeight: '600',
+                  background: taskName.trim() ? 'linear-gradient(135deg, var(--accent-primary), var(--accent-glow))' : 'var(--bg-elevated)',
+                  border: 'none', borderRadius: 'var(--radius-md)',
+                  color: taskName.trim() ? 'white' : 'var(--text-muted)',
+                  cursor: taskName.trim() ? 'pointer' : 'not-allowed',
+                }}
+              >
+                {isProcessing ? 'AI is chunking...' : 'Add Task'}
+              </button>
+            </form>
+          </div>
+        </div>
+      );
+    };
+
+    // Profile Screen
+    const ProfileScreen = ({ user, onClose, onUpgrade, onLogout }) => {
+      return (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'var(--bg-main)', zIndex: 100, overflow: 'auto' }}>
+          <div style={{ padding: '20px', paddingTop: '48px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '32px' }}>
+              <h2 style={{ fontSize: '24px', fontWeight: '700' }}>Profile</h2>
+              <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><Icons.X /></button>
+            </div>
+            
+            {/* User Info */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '32px' }}>
+              <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-glow))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icons.User />
+              </div>
+              <div>
+                <div style={{ fontSize: '18px', fontWeight: '600' }}>{user.name || 'ADHD Warrior'}</div>
+                <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>{user.email || 'Free Trial'}</div>
+              </div>
+            </div>
+            
+            {/* Subscription Card */}
+            <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', padding: '20px', marginBottom: '24px', border: user.plan === 'pro' ? '2px solid var(--accent-success)' : '1px solid var(--border-subtle)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                <Icons.Crown />
+                <span style={{ fontSize: '16px', fontWeight: '600' }}>
+                  {user.plan === 'pro' ? 'Pro Plan' : 'Free Trial'}
+                </span>
+                {user.plan === 'pro' && <span style={{ padding: '4px 8px', background: 'var(--accent-success)', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>ACTIVE</span>}
+              </div>
+              
+              {user.plan === 'pro' ? (
+                <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
+                  <p>Next billing: {user.nextBilling || 'Feb 15, 2025'}</p>
+                  <p style={{ marginTop: '8px' }}>$5/month • Cancel anytime</p>
+                </div>
+              ) : (
+                <>
+                  <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+                    {user.trialDaysLeft || 7} days left in your trial
+                  </p>
+                  <button
+                    onClick={onUpgrade}
+                    style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-glow))', border: 'none', borderRadius: 'var(--radius-md)', color: 'white', fontWeight: '600', cursor: 'pointer' }}
+                  >
+                    Upgrade to Pro — $5/month
+                  </button>
+                </>
+              )}
+            </div>
+            
+            {/* Payment Info (Legal requirement) */}
+            {user.plan === 'pro' && (
+              <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', padding: '20px', marginBottom: '24px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                  <Icons.CreditCard />
+                  <span style={{ fontSize: '16px', fontWeight: '600' }}>Payment Method</span>
+                </div>
+                <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
+                  <p>•••• •••• •••• 4242</p>
+                  <p style={{ marginTop: '8px' }}>Expires 12/25</p>
+                </div>
+                <button style={{ marginTop: '16px', padding: '10px 16px', background: 'var(--bg-elevated)', border: 'none', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontSize: '14px', cursor: 'pointer' }}>
+                  Manage Subscription
+                </button>
+              </div>
+            )}
+            
+            {/* Links */}
+            <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
+              {[
+                { icon: <Icons.Help />, label: 'Help & FAQ', action: () => {} },
+                { icon: <Icons.Link />, label: 'Connect Google Calendar', action: () => {} },
+                { icon: <Icons.Settings />, label: 'Notification Settings', action: () => {} },
+              ].map((item, i) => (
+                <button
+                  key={i}
+                  onClick={item.action}
+                  style={{ width: '100%', padding: '16px 20px', background: 'none', border: 'none', borderBottom: i < 2 ? '1px solid var(--border-subtle)' : 'none', color: 'var(--text-primary)', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', textAlign: 'left' }}
+                >
+                  {item.icon}
+                  {item.label}
+                  <div style={{ marginLeft: 'auto', color: 'var(--text-muted)' }}><Icons.ChevronRight /></div>
+                </button>
+              ))}
+            </div>
+            
+            {/* Legal Footer */}
+            <div style={{ marginTop: '32px', textAlign: 'center', fontSize: '12px', color: 'var(--text-muted)' }}>
+              <p>NEURODONE v1.0</p>
+              <p style={{ marginTop: '8px' }}>
+                <a href="/terms" style={{ color: 'var(--text-muted)' }}>Terms</a> • 
+                <a href="/privacy" style={{ color: 'var(--text-muted)', marginLeft: '8px' }}>Privacy</a> • 
+                <a href="/refund" style={{ color: 'var(--text-muted)', marginLeft: '8px' }}>Refund Policy</a>
+              </p>
+              <p style={{ marginTop: '8px' }}>Business ID: Your IČO here</p>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // Help/FAQ Screen
+    const HelpScreen = ({ onClose }) => {
+      const faqs = [
+        { q: 'How does voice-to-task work?', a: 'Tap the + button, then "Speak task". Just talk naturally — our AI extracts the task name, project, and deadline automatically.' },
+        { q: 'What is task chunking?', a: 'Big tasks paralyze ADHD brains. NEURODONE automatically breaks every task into 3-5 small, actionable chunks you can actually start.' },
+        { q: 'Can I cancel anytime?', a: 'Yes! Cancel with one click in your Profile. No questions asked.' },
+        { q: 'How do I connect Google Calendar?', a: 'Go to Profile → Connect Google Calendar. Your events will appear alongside your tasks.' },
+      ];
+      
+      return (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'var(--bg-main)', zIndex: 100, overflow: 'auto' }}>
+          <div style={{ padding: '20px', paddingTop: '48px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '32px' }}>
+              <h2 style={{ fontSize: '24px', fontWeight: '700' }}>Help & FAQ</h2>
+              <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><Icons.X /></button>
+            </div>
+            
+            {/* Quick Start */}
+            <div style={{ background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-glow))', borderRadius: 'var(--radius-lg)', padding: '20px', marginBottom: '24px' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '12px' }}>🚀 Quick Start</h3>
+              <ol style={{ marginLeft: '20px', fontSize: '14px', lineHeight: 1.8 }}>
+                <li>Tap the + button in bottom right</li>
+                <li>Choose "Speak task" or "Type task"</li>
+                <li>AI will chunk it into small steps</li>
+                <li>Check off chunks as you go!</li>
+              </ol>
+            </div>
+            
+            {/* FAQs */}
+            <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '16px' }}>Frequently Asked Questions</h3>
+            {faqs.map((faq, i) => (
+              <div key={i} style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-md)', padding: '16px', marginBottom: '12px' }}>
+                <div style={{ fontWeight: '600', marginBottom: '8px' }}>{faq.q}</div>
+                <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>{faq.a}</div>
+              </div>
+            ))}
+            
+            {/* Contact */}
+            <div style={{ marginTop: '32px', textAlign: 'center' }}>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: '12px' }}>Still need help?</p>
+              <a href="mailto:hello@neurodone.app" style={{ color: 'var(--accent-primary)', fontWeight: '600' }}>hello@neurodone.app</a>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // Paywall Screen
+    const PaywallScreen = ({ onClose, onSelectPlan }) => {
+      return (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'var(--bg-deep)', zIndex: 100, overflow: 'auto' }}>
+          <div style={{ padding: '20px', paddingTop: '48px', maxWidth: '400px', margin: '0 auto' }}>
+            <button onClick={onClose} style={{ position: 'absolute', top: '48px', right: '20px', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><Icons.X /></button>
+            
+            <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+              <div style={{ fontSize: '48px', marginBottom: '16px' }}>🧠</div>
+              <h2 style={{ fontSize: '28px', fontWeight: '700', marginBottom: '12px' }}>Unlock NEURODONE Pro</h2>
+              <p style={{ color: 'var(--text-secondary)' }}>Get unlimited access to all features</p>
+            </div>
+            
+            {/* Features */}
+            <div style={{ marginBottom: '32px' }}>
+              {[
+                '✓ Unlimited voice-to-task',
+                '✓ AI task chunking',
+                '✓ Google Calendar sync',
+                '✓ Smart ADHD reminders',
+                '✓ All future features',
+              ].map((f, i) => (
+                <div key={i} style={{ padding: '12px 0', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}>{f}</div>
+              ))}
+            </div>
+            
+            {/* Pricing Options */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
+              <button
+                onClick={() => onSelectPlan('yearly')}
+                style={{ padding: '20px', background: 'var(--bg-card)', border: '2px solid var(--accent-primary)', borderRadius: 'var(--radius-lg)', cursor: 'pointer', textAlign: 'left', position: 'relative' }}
+              >
+                <div style={{ position: 'absolute', top: '-10px', right: '16px', background: 'var(--accent-success)', padding: '4px 12px', borderRadius: '100px', fontSize: '11px', fontWeight: '600' }}>SAVE 35%</div>
+                <div style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text-primary)' }}>Yearly</div>
+                <div style={{ fontSize: '24px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>$39<span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>/year</span></div>
+                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>$3.25/month, billed yearly</div>
+              </button>
+              
+              <button
+                onClick={() => onSelectPlan('monthly')}
+                style={{ padding: '20px', background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', cursor: 'pointer', textAlign: 'left' }}
+              >
+                <div style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text-primary)' }}>Monthly</div>
+                <div style={{ fontSize: '24px', fontWeight: '700', color: 'var(--text-primary)', marginTop: '4px' }}>$5<span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>/month</span></div>
+                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>Cancel anytime</div>
+              </button>
+            </div>
+            
+            <p style={{ textAlign: 'center', fontSize: '13px', color: 'var(--text-muted)' }}>
+              7-day free trial • Cancel anytime<br />
+              By subscribing you agree to our <a href="/terms" style={{ color: 'var(--text-muted)' }}>Terms</a> and <a href="/privacy" style={{ color: 'var(--text-muted)' }}>Privacy Policy</a>
+            </p>
+          </div>
+        </div>
+      );
+    };
+
+    // Bottom Navigation
+    const BottomNav = ({ activeTab, onTabChange, onProfileClick }) => {
+      const tabs = [
+        { id: 'today', icon: Icons.List, label: 'Today' },
+        { id: 'calendar', icon: Icons.Calendar, label: 'Calendar' },
+        { id: 'projects', icon: Icons.Folder, label: 'Projects' },
+        { id: 'profile', icon: Icons.User, label: 'Profile' },
+      ];
+      
+      return (
+        <nav style={{ display: 'flex', justifyContent: 'space-around', padding: '12px 16px', paddingBottom: '28px', background: 'var(--bg-card)', borderTop: '1px solid var(--border-subtle)' }}>
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => tab.id === 'profile' ? onProfileClick() : onTabChange(tab.id)}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', padding: '8px 16px', background: 'none', border: 'none', cursor: 'pointer', color: isActive ? 'var(--accent-primary)' : 'var(--text-muted)' }}
+              >
+                <Icon />
+                <span style={{ fontSize: '11px', fontWeight: isActive ? '600' : '400' }}>{tab.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      );
+    };
+
+    // Onboarding Screen
+    const OnboardingScreen = ({ onStart }) => (
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', textAlign: 'center', background: 'linear-gradient(180deg, var(--bg-deep) 0%, var(--bg-main) 100%)' }}>
+        <div style={{ width: '80px', height: '80px', borderRadius: '24px', background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-glow))', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '32px', boxShadow: 'var(--shadow-glow)', animation: 'float 3s ease-in-out infinite' }}>
+          <Icons.Brain />
+        </div>
+        <h1 style={{ fontSize: '32px', fontWeight: '700', marginBottom: '12px', letterSpacing: '-0.5px' }}>NEURODONE</h1>
+        <p style={{ fontSize: '16px', color: 'var(--text-secondary)', marginBottom: '48px', maxWidth: '280px', lineHeight: 1.6 }}>
+          Task management that works <em>with</em> your ADHD brain, not against it.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', maxWidth: '320px', marginBottom: '48px' }}>
+          {[
+            { icon: '🎤', text: 'Voice-to-task with AI parsing' },
+            { icon: '🧩', text: 'Auto-chunks big tasks into small wins' },
+            { icon: '🎯', text: 'ADHD-friendly reminders' },
+            { icon: '✨', text: 'Dopamine-preserving design' },
+          ].map((feature, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px', background: 'var(--bg-card)', borderRadius: 'var(--radius-md)', textAlign: 'left', animation: `slideUp 0.4s ease ${i * 0.1}s both` }}>
+              <span style={{ fontSize: '24px' }}>{feature.icon}</span>
+              <span style={{ fontSize: '14px' }}>{feature.text}</span>
+            </div>
+          ))}
+        </div>
+        <button onClick={onStart} style={{ width: '100%', maxWidth: '320px', padding: '18px', fontSize: '16px', fontWeight: '600', background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-glow))', border: 'none', borderRadius: 'var(--radius-lg)', color: 'white', cursor: 'pointer', boxShadow: 'var(--shadow-glow)' }}>
+          Start 7-Day Free Trial
+        </button>
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '16px' }}>No credit card required</p>
+      </div>
+    );
+
+    // Projects View
+    const ProjectsView = ({ tasks }) => {
+      const projects = {};
+      tasks.forEach(task => {
+        if (!projects[task.project]) projects[task.project] = [];
+        projects[task.project].push(task);
+      });
+      
+      return (
+        <div style={{ padding: '20px' }}>
+          <h2 style={{ fontSize: '24px', fontWeight: '600', marginBottom: '20px' }}>Projects</h2>
+          {Object.keys(projects).length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
+              <Icons.Folder /><p style={{ marginTop: '12px' }}>No projects yet</p>
+            </div>
+          ) : (
+            Object.entries(projects).map(([name, projectTasks]) => {
+              const completed = projectTasks.filter(t => t.completed).length;
+              const progress = (completed / projectTasks.length) * 100;
+              return (
+                <div key={name} style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', padding: '20px', marginBottom: '12px', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600' }}>{name}</h3>
+                    <span style={{ fontSize: '13px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{completed}/{projectTasks.length}</span>
+                  </div>
+                  <div style={{ height: '4px', background: 'var(--bg-elevated)', borderRadius: '2px', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${progress}%`, background: progress === 100 ? 'var(--accent-success)' : 'linear-gradient(90deg, var(--accent-primary), var(--accent-glow))', borderRadius: '2px' }} />
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      );
+    };
+
+    // ============================================
+    // MAIN APP
+    // ============================================
+    
+    const App = () => {
+      const [isOnboarded, setIsOnboarded] = useState(() => localStorage.getItem('neurodone_onboarded') === 'true');
+      const [tasks, setTasks] = useState(() => {
+        const saved = localStorage.getItem('neurodone_tasks');
+        return saved ? JSON.parse(saved) : [];
+      });
+      const [user, setUser] = useState(() => {
+        const saved = localStorage.getItem('neurodone_user');
+        return saved ? JSON.parse(saved) : { plan: 'trial', trialDaysLeft: 7 };
+      });
+      const [activeTab, setActiveTab] = useState('today');
+      const [selectedDate, setSelectedDate] = useState(new Date());
+      const [showQuickAdd, setShowQuickAdd] = useState(false);
+      const [showCelebration, setShowCelebration] = useState(false);
+      const [showProfile, setShowProfile] = useState(false);
+      const [showHelp, setShowHelp] = useState(false);
+      const [showPaywall, setShowPaywall] = useState(false);
+      
+      useEffect(() => { localStorage.setItem('neurodone_tasks', JSON.stringify(tasks)); }, [tasks]);
+      useEffect(() => { localStorage.setItem('neurodone_user', JSON.stringify(user)); }, [user]);
+      
+      const handleVoiceTask = (task) => setTasks(prev => [task, ...prev]);
+      const handleAddTask = (task) => setTasks(prev => [task, ...prev]);
+      const handleToggleChunk = (taskId, chunkId) => {
+        setTasks(prev => prev.map(task => task.id === taskId ? { ...task, chunks: task.chunks.map(chunk => chunk.id === chunkId ? { ...chunk, completed: !chunk.completed } : chunk) } : task));
+      };
+      const handleCompleteTask = (taskId) => {
+        setShowCelebration(true);
+        setTasks(prev => prev.map(task => task.id === taskId ? { ...task, completed: true } : task));
+      };
+      const handleStartTrial = () => {
+        localStorage.setItem('neurodone_onboarded', 'true');
+        setIsOnboarded(true);
+      };
+      const handleSelectPlan = async (plan) => {
+        await createCheckoutSession('user_demo', 'user@example.com', plan);
+      };
+      
+      const todayTasks = tasks.filter(task => {
+        const taskDate = new Date(task.deadline);
+        const today = new Date();
+        return taskDate.toDateString() === today.toDateString() || (taskDate < today && !task.completed);
+      });
+      
+      const calendarTasks = tasks.filter(task => new Date(task.deadline).toDateString() === selectedDate.toDateString());
+      
+      if (!isOnboarded) return <OnboardingScreen onStart={handleStartTrial} />;
+      
+      return (
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg-main)' }}>
+          {/* Header */}
+          <header style={{ padding: '16px 20px', paddingTop: '48px', background: 'var(--bg-deep)', borderBottom: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>
+                  {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
+                </div>
+                <h1 style={{ fontSize: '24px', fontWeight: '700' }}>
+                  {activeTab === 'today' && 'Today'}
+                  {activeTab === 'calendar' && 'Calendar'}
+                  {activeTab === 'projects' && 'Projects'}
+                </h1>
+              </div>
+              {todayTasks.filter(t => !t.completed).length > 0 && (
+                <div style={{ padding: '6px 12px', background: 'var(--bg-card)', borderRadius: 'var(--radius-sm)', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                  <span style={{ color: 'var(--accent-primary)', fontWeight: '600' }}>{todayTasks.filter(t => !t.completed).length}</span> tasks
+                </div>
+              )}
+            </div>
+          </header>
+          
+          {/* Main Content */}
+          <main style={{ flex: 1, overflow: 'auto', padding: activeTab === 'projects' ? '0' : '20px' }}>
+            {activeTab === 'today' && (
+              todayTasks.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+                  <div style={{ fontSize: '48px', marginBottom: '16px' }}>🎉</div>
+                  <h2 style={{ fontSize: '20px', fontWeight: '600', marginBottom: '8px' }}>All clear!</h2>
+                  <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '24px' }}>No tasks for today. Enjoy your freedom!</p>
+                  <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Tap + to add a task</p>
+                </div>
+              ) : todayTasks.map(task => <TaskCard key={task.id} task={task} onToggleChunk={handleToggleChunk} onComplete={handleCompleteTask} />)
+            )}
+            
+            {activeTab === 'calendar' && (
+              <>
+                <CalendarView tasks={tasks} selectedDate={selectedDate} onDateSelect={setSelectedDate} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
+                  <h2 style={{ fontSize: '16px', fontWeight: '600' }}>{getRelativeDay(selectedDate)}</h2>
+                </div>
+                {calendarTasks.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
+                    <p>No tasks scheduled</p><p style={{ fontSize: '14px', marginTop: '8px' }}>Tap + to add one</p>
+                  </div>
+                ) : calendarTasks.map(task => <TaskCard key={task.id} task={task} onToggleChunk={handleToggleChunk} onComplete={handleCompleteTask} />)}
+              </>
+            )}
+            
+            {activeTab === 'projects' && <ProjectsView tasks={tasks} />}
+          </main>
+          
+          {/* Universal Add Button */}
+          <UniversalAddButton onVoiceTask={handleVoiceTask} onOpenTextInput={() => setShowQuickAdd(true)} />
+          
+          {/* Bottom Nav */}
+          <BottomNav activeTab={activeTab} onTabChange={setActiveTab} onProfileClick={() => setShowProfile(true)} />
+          
+          {/* Modals */}
+          <QuickAddModal isOpen={showQuickAdd} onClose={() => setShowQuickAdd(false)} onAdd={handleAddTask} prefilledDate={activeTab === 'calendar' ? selectedDate : null} />
+          {showProfile && <ProfileScreen user={user} onClose={() => setShowProfile(false)} onUpgrade={() => { setShowProfile(false); setShowPaywall(true); }} />}
+          {showHelp && <HelpScreen onClose={() => setShowHelp(false)} />}
+          {showPaywall && <PaywallScreen onClose={() => setShowPaywall(false)} onSelectPlan={handleSelectPlan} />}
+          <Celebration show={showCelebration} onComplete={() => setShowCelebration(false)} />
+          
+          {/* Global Styles */}
+          <style>{`
+            @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+            @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+            @keyframes popIn { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+            @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+            @keyframes spin { to { transform: rotate(360deg); } }
+            @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+          `}</style>
+        </div>
+      );
+    };
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "routes": [
+    { "src": "/app", "dest": "/app.html" },
+    { "src": "/", "dest": "/landing.html" },
+    { "src": "/terms", "dest": "/terms.html" },
+    { "src": "/privacy", "dest": "/privacy.html" }
+  ]
+}

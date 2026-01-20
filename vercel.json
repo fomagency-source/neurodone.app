@@ -1,7 +1,0 @@
-{
-  "version": 2,
-  "routes": [
-    { "src": "/app", "dest": "/app.html" },
-    { "src": "/", "dest": "/landing.html" }
-  ]
-}

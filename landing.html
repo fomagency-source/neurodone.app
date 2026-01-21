@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="NEURODONE - Task manager built by someone with ADHD, for ADHD brains. Voice input, AI chunking, real community.">
+  <meta name="author" content="Ihor Fomenko">
+  <title>NEURODONE - Built by ADHD, for ADHD</title>
+  <link rel="icon" href="/icon-192.svg">
+  <link rel="apple-touch-icon" href="/icon-192.svg">
+  <style>
+    :root {
+      --bg-main: #0a0a0f;
+      --bg-card: #13131a;
+      --bg-elevated: #1a1a24;
+      --border-subtle: #2a2a3a;
+      --text-primary: #f5f5f7;
+      --text-secondary: #a1a1aa;
+      --text-muted: #71717a;
+      --accent-primary: #6366f1;
+      --accent-glow: #8b5cf6;
+      --accent-success: #22c55e;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg-main);
+      color: var(--text-primary);
+      line-height: 1.7;
+    }
+    .container { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+    a { color: var(--accent-primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Hero */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 80px 24px;
+    }
+    .hero-content {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    .hero-intro {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      margin-bottom: 40px;
+      flex-wrap: wrap;
+    }
+    .hero-photo {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 3px solid var(--accent-primary);
+      background: var(--bg-card);
+    }
+    .hero-name h1 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .hero-name p {
+      color: var(--text-secondary);
+      font-size: 16px;
+    }
+    .hero h2 {
+      font-size: clamp(32px, 6vw, 48px);
+      font-weight: 800;
+      margin-bottom: 24px;
+      background: linear-gradient(135deg, var(--accent-primary), var(--accent-glow));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      line-height: 1.2;
+    }
+    .hero-text {
+      font-size: 18px;
+      color: var(--text-secondary);
+      margin-bottom: 32px;
+    }
+    .cta-group {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .cta-button {
+      display: inline-block;
+      padding: 16px 32px;
+      background: linear-gradient(135deg, var(--accent-primary), var(--accent-glow));
+      color: white;
+      text-decoration: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 700;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .cta-button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 30px rgba(99, 102, 241, 0.4);
+      text-decoration: none;
+    }
+    .cta-secondary {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+    }
+    .cta-secondary:hover {
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .hero-note {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    /* Story Section */
+    .story {
+      padding: 80px 24px;
+    }
+    .story h2 {
+      font-size: 28px;
+      margin-bottom: 32px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .story-content p {
+      margin-bottom: 24px;
+      font-size: 17px;
+      color: var(--text-secondary);
+    }
+    .story-content strong {
+      color: var(--text-primary);
+    }
+    .highlight-box {
+      background: var(--bg-card);
+      border-left: 4px solid var(--accent-primary);
+      padding: 24px;
+      margin: 32px 0;
+      border-radius: 0 12px 12px 0;
+    }
+    .highlight-box p {
+      margin: 0;
+      font-size: 18px;
+      font-style: italic;
+      color: var(--text-primary);
+    }
+    .diagnosis-year {
+      display: inline-block;
+      background: var(--accent-primary);
+      color: white;
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    /* Features */
+    .features {
+      padding: 80px 24px;
+      background: var(--bg-card);
+    }
+    .features h2 {
+      font-size: 28px;
+      text-align: center;
+      margin-bottom: 48px;
+    }
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .feature-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      padding: 28px;
+    }
+    .feature-icon {
+      font-size: 36px;
+      margin-bottom: 16px;
+    }
+    .feature-card h3 {
+      font-size: 18px;
+      margin-bottom: 10px;
+    }
+    .feature-card p {
+      color: var(--text-secondary);
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    /* Pricing */
+    .pricing {
+      padding: 80px 24px;
+    }
+    .pricing h2 {
+      font-size: 28px;
+      text-align: center;
+      margin-bottom: 16px;
+    }
+    .pricing-subtitle {
+      text-align: center;
+      color: var(--text-secondary);
+      margin-bottom: 48px;
+      font-size: 17px;
+    }
+    .pricing-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+      max-width: 700px;
+      margin: 0 auto;
+    }
+    .pricing-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 20px;
+      padding: 32px;
+      text-align: center;
+    }
+    .pricing-card.featured {
+      border: 2px solid var(--accent-primary);
+      position: relative;
+    }
+    .pricing-badge {
+      position: absolute;
+      top: -12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: linear-gradient(135deg, var(--accent-primary), var(--accent-glow));
+      color: white;
+      padding: 6px 16px;
+      border-radius: 100px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .pricing-amount {
+      font-size: 48px;
+      font-weight: 800;
+      margin: 16px 0;
+    }
+    .pricing-amount span {
+      font-size: 18px;
+      color: var(--text-secondary);
+      font-weight: 400;
+    }
+    .pricing-period {
+      color: var(--text-muted);
+      font-size: 14px;
+      margin-bottom: 24px;
+    }
+    .pricing-features {
+      text-align: left;
+      margin-bottom: 24px;
+    }
+    .pricing-features li {
+      list-style: none;
+      padding: 10px 0;
+      color: var(--text-secondary);
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .pricing-features li::before {
+      content: "✓";
+      color: var(--accent-success);
+      font-weight: 700;
+    }
+    .pricing-note {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 16px;
+    }
+
+    /* Community */
+    .community {
+      padding: 80px 24px;
+      background: var(--bg-card);
+    }
+    .community h2 {
+      font-size: 28px;
+      text-align: center;
+      margin-bottom: 16px;
+    }
+    .community-subtitle {
+      text-align: center;
+      color: var(--text-secondary);
+      margin-bottom: 48px;
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .community-links {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      flex-wrap: wrap;
+      margin-bottom: 48px;
+    }
+    .community-link {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 24px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      color: var(--text-primary);
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    .community-link:hover {
+      border-color: var(--accent-primary);
+      text-decoration: none;
+      transform: translateY(-2px);
+    }
+    .community-link svg {
+      width: 24px;
+      height: 24px;
+    }
+
+    /* Feedback Form */
+    .feedback {
+      padding: 80px 24px;
+    }
+    .feedback h2 {
+      font-size: 28px;
+      text-align: center;
+      margin-bottom: 16px;
+    }
+    .feedback-subtitle {
+      text-align: center;
+      color: var(--text-secondary);
+      margin-bottom: 48px;
+    }
+    .feedback-form {
+      max-width: 500px;
+      margin: 0 auto;
+      background: var(--bg-card);
+      padding: 32px;
+      border-radius: 20px;
+      border: 1px solid var(--border-subtle);
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      font-size: 14px;
+    }
+    .form-group input,
+    .form-group textarea,
+    .form-group select {
+      width: 100%;
+      padding: 14px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      color: var(--text-primary);
+      font-size: 16px;
+      font-family: inherit;
+      transition: border-color 0.2s;
+    }
+    .form-group input:focus,
+    .form-group textarea:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+    }
+    .form-group textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+    .submit-btn {
+      width: 100%;
+      padding: 16px;
+      background: linear-gradient(135deg, var(--accent-primary), var(--accent-glow));
+      border: none;
+      border-radius: 10px;
+      color: white;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .submit-btn:hover {
+      transform: translateY(-2px);
+    }
+    .form-note {
+      text-align: center;
+      margin-top: 16px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    /* About Me */
+    .about {
+      padding: 80px 24px;
+      background: var(--bg-card);
+    }
+    .about-content {
+      max-width: 720px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 2fr;
+      gap: 40px;
+      align-items: start;
+    }
+    @media (max-width: 600px) {
+      .about-content {
+        grid-template-columns: 1fr;
+        text-align: center;
+      }
+    }
+    .about-photo {
+      width: 100%;
+      max-width: 200px;
+      border-radius: 16px;
+      border: 3px solid var(--border-subtle);
+    }
+    .about-text h2 {
+      font-size: 24px;
+      margin-bottom: 16px;
+    }
+    .about-text p {
+      color: var(--text-secondary);
+      margin-bottom: 16px;
+      font-size: 15px;
+    }
+    .about-links {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .about-links a {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+    .about-links a:hover {
+      color: var(--accent-primary);
+    }
+
+    /* Footer */
+    footer {
+      padding: 40px 24px;
+      text-align: center;
+      border-top: 1px solid var(--border-subtle);
+    }
+    footer p {
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+    .footer-links {
+      margin-bottom: 16px;
+    }
+    .footer-links a {
+      color: var(--text-secondary);
+      margin: 0 12px;
+      font-size: 14px;
+    }
+
+    /* Animations */
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+    .emoji-float {
+      display: inline-block;
+      animation: float 3s ease-in-out infinite;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-content">
+      <div class="hero-intro">
+        <!-- Replace src with your actual photo URL -->
+        <img src="/ihor.webp" alt="Ihor Fomenko" class="hero-photo" onerror="this.style.background='linear-gradient(135deg, var(--accent-primary), var(--accent-glow))'; this.style.display='flex';">
+        <div class="hero-name">
+          <h1>Hey, I'm Ihor 👋</h1>
+          <p>Diagnosed with ADHD in 2023. Building what I needed.</p>
+        </div>
+      </div>
+      
+      <h2>I built the task manager I wish existed 10 years ago</h2>
+      
+      <p class="hero-text">
+        After 13+ years in marketing and managing teams, I finally understood why 
+        every task manager failed me. They weren't built for brains like mine.
+      </p>
+      
+      <div class="cta-group">
+        <a href="/app" class="cta-button">Try NEURODONE Free</a>
+        <a href="#community" class="cta-button cta-secondary">Join Community</a>
+      </div>
+      <p class="hero-note">$5/month after trial • Chat directly with me • Shape the product</p>
+    </div>
+  </section>
+
+  <!-- My Story -->
+  <section class="story">
+    <div class="container">
+      <h2><span class="emoji-float">🧠</span> My Story</h2>
+      
+      <div class="story-content">
+        <p>
+          I was <strong>undiagnosed with ADHD until 2023</strong>. 
+          <span class="diagnosis-year">Age 32</span>
+        </p>
+        
+        <p>
+          It was a huge revelation. Suddenly, things started to make sense. 
+          Why I could hyperfocus on exciting projects but couldn't reply to a simple email. 
+          Why I built marketing teams across Europe but forgot my own appointments.
+        </p>
+        
+        <div class="highlight-box">
+          <p>"Why the hell can't I work with any task manager? Am I broken?"</p>
+        </div>
+        
+        <p>
+          I have a medical education background and understand a bit about mental health. 
+          I've asked professionals countless questions and researched obsessively 
+          (dear ADHD people, you know how it goes 😅).
+        </p>
+        
+        <p>
+          Being a <strong>marketing person for 13+ years</strong> — including managing teams at 
+          IMAX, crypto startups, and SaaS companies — I was constantly annoyed by how 
+          standard task managers are built. Too many options. Too much organization required. 
+          The moment I see a wall of tasks, my brain just... shuts down.
+        </p>
+        
+        <p>
+          After diagnosis, I started researching ADHD productivity solutions. 
+          And I found <strong>nothing that truly worked</strong> for our community:
+        </p>
+        
+        <ul style="color: var(--text-secondary); margin: 24px 0; padding-left: 24px;">
+          <li style="margin-bottom: 12px;">Some are <strong>greedy on price</strong> ($15-30/month for basic features)</li>
+          <li style="margin-bottom: 12px;">Some are <strong>mono-functional</strong> (one trick, no ecosystem)</li>
+          <li style="margin-bottom: 12px;">None of them are <strong>building a real community</strong></li>
+        </ul>
+        
+        <p>
+          <strong>That's my goal with NEURODONE.</strong>
+        </p>
+        
+        <p>
+          I started with my basic understanding of how such a thing should work, 
+          and I'll keep adding features to test. The best part? 
+          <strong>You can chat with me directly</strong> and join our Discord/WhatsApp 
+          where I share updates and we all help each other build the best product possible.
+        </p>
+        
+        <div class="highlight-box">
+          <p>
+            I charge $5/month (or $39/year) to have a steady base to support you all 
+            — and not lose dopamine and burn out quickly from this shiny new project 😄
+          </p>
+        </div>
+        
+        <p>
+          This product is built solely by me. With your active contributions, 
+          we can discuss different collaboration options in the future.
+        </p>
+        
+        <p style="font-size: 20px; margin-top: 32px;">
+          <strong>Let's build this together.</strong><br>
+          <span style="color: var(--text-muted);">— Ihor</span>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="features">
+    <div class="container">
+      <h2>Built Different (For Real)</h2>
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon">🎤</div>
+          <h3>Voice-First Input</h3>
+          <p>Brain dump for 30 seconds. AI structures everything — tasks, projects, deadlines. Zero friction.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🧩</div>
+          <h3>AI Task Chunking</h3>
+          <p>"Finish pitch deck" becomes Research → Outline → Draft → Design → Review. Start easy.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🎯</div>
+          <h3>One Thing at a Time</h3>
+          <p>No overwhelming dashboards. Focus on today. Complete chunks. Feel actual progress.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🎉</div>
+          <h3>Dopamine Rewards</h3>
+          <p>Micro-celebrations for every win. Confetti, sounds, visual feedback. Your brain needs those hits.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">💬</div>
+          <h3>Talk to AI Coach</h3>
+          <p>30-second conversation mode: AI asks questions, helps prioritize, structures your chaos.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">👥</div>
+          <h3>Real Community</h3>
+          <p>Direct chat with me. Discord & WhatsApp groups. We build features together.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing -->
+  <section class="pricing">
+    <div class="container">
+      <h2>Simple, Fair Pricing</h2>
+      <p class="pricing-subtitle">
+        I'm not here to squeeze money from people who already struggle. 
+        Just enough to keep this sustainable.
+      </p>
+      
+      <div class="pricing-cards">
+        <div class="pricing-card">
+          <h3>Monthly</h3>
+          <div class="pricing-amount">$5<span>/mo</span></div>
+          <p class="pricing-period">Billed monthly</p>
+          <ul class="pricing-features">
+            <li>All features unlocked</li>
+            <li>Voice input + AI chunking</li>
+            <li>Direct chat with Ihor</li>
+            <li>Community access</li>
+            <li>Shape the roadmap</li>
+          </ul>
+          <a href="/app" class="cta-button" style="display: block; text-align: center;">Start Free Trial</a>
+        </div>
+        
+        <div class="pricing-card featured">
+          <span class="pricing-badge">Save 35%</span>
+          <h3>Yearly</h3>
+          <div class="pricing-amount">$39<span>/yr</span></div>
+          <p class="pricing-period">~$3.25/month</p>
+          <ul class="pricing-features">
+            <li>Everything in Monthly</li>
+            <li>Priority feature requests</li>
+            <li>Early access to new features</li>
+            <li>Founding member badge</li>
+            <li>My eternal gratitude 🙏</li>
+          </ul>
+          <a href="/app" class="cta-button" style="display: block; text-align: center;">Start Free Trial</a>
+        </div>
+      </div>
+      
+      <p class="pricing-note" style="text-align: center; margin-top: 32px;">
+        7-day free trial • Cancel anytime • No credit card for trial
+      </p>
+    </div>
+  </section>
+
+  <!-- Community -->
+  <section class="community" id="community">
+    <div class="container">
+      <h2>Join the Community</h2>
+      <p class="community-subtitle">
+        This isn't just an app. It's a space where we help each other figure out 
+        how to work with our ADHD brains, not against them.
+      </p>
+      
+      <div class="community-links">
+        <a href="https://discord.gg/YOUR_DISCORD" class="community-link" target="_blank">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03z"/></svg>
+          Discord Server
+        </a>
+        <a href="https://chat.whatsapp.com/YOUR_WHATSAPP" class="community-link" target="_blank">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.625.846 5.059 2.284 7.034L.789 23.492a.75.75 0 0 0 .918.918l4.458-1.495A11.945 11.945 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0z"/></svg>
+          WhatsApp Group
+        </a>
+        <a href="https://linkedin.com/in/ihorfomenko" class="community-link" target="_blank">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+          LinkedIn
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Feedback Form -->
+  <section class="feedback" id="feedback">
+    <div class="container">
+      <h2>Talk to Me Directly</h2>
+      <p class="feedback-subtitle">
+        Feature request? Bug report? Just want to say hi? I read every message.
+      </p>
+      
+      <form class="feedback-form" action="https://formspree.io/f/YOUR_FORM_ID" method="POST">
+        <div class="form-group">
+          <label for="name">Your Name</label>
+          <input type="text" id="name" name="name" placeholder="How should I call you?" required>
+        </div>
+        
+        <div class="form-group">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" placeholder="your@email.com" required>
+        </div>
+        
+        <div class="form-group">
+          <label for="type">What's this about?</label>
+          <select id="type" name="type">
+            <option value="feature">Feature Request</option>
+            <option value="bug">Bug Report</option>
+            <option value="feedback">General Feedback</option>
+            <option value="collab">Collaboration Idea</option>
+            <option value="hello">Just Saying Hi 👋</option>
+          </select>
+        </div>
+        
+        <div class="form-group">
+          <label for="message">Your Message</label>
+          <textarea id="message" name="message" placeholder="Tell me what's on your mind..." required></textarea>
+        </div>
+        
+        <button type="submit" class="submit-btn">Send Message</button>
+        <p class="form-note">I typically respond within 24-48 hours</p>
+      </form>
+    </div>
+  </section>
+
+  <!-- About -->
+  <section class="about">
+    <div class="about-content">
+      <img src="/ihor.webp" alt="Ihor Fomenko" class="about-photo" onerror="this.style.background='linear-gradient(135deg, var(--accent-primary), var(--accent-glow))'; this.style.minHeight='200px';">
+      <div class="about-text">
+        <h2>About Me</h2>
+        <p>
+          <strong>Ihor Fomenko</strong> — Head of Marketing with 13+ years in SaaS, Crypto, and Tech across EU. 
+          Built teams from scratch, scaled products to thousands of users, managed campaigns at IMAX Ukraine.
+        </p>
+        <p>
+          Originally from Ukraine, now based in Malta. Speak 6 languages. 
+          Passionate about making productivity tools that actually work for neurodivergent brains.
+        </p>
+        <p>
+          Also into photography, piano, volunteering (beaches & cats), and probably researching 
+          something random at 3 AM because ADHD.
+        </p>
+        <div class="about-links">
+          <a href="https://linkedin.com/in/ihorfomenko" target="_blank">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+            LinkedIn
+          </a>
+          <a href="mailto:fomagency@gmail.com">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            fomagency@gmail.com
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="footer-links">
+      <a href="/app">App</a>
+      <a href="#community">Community</a>
+      <a href="#feedback">Contact</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+    </div>
+    <p>Made with 🧠 by Ihor Fomenko • © 2026 NEURODONE</p>
+  </footer>
+
+</body>
+</html>

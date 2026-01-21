@@ -1,8 +1,0 @@
-{
-  "version": 2,
-  "routes": [
-    { "src": "/api/parse", "dest": "/api/parse.js" },
-    { "src": "/app", "dest": "/app.html" },
-    { "src": "/", "dest": "/landing.html" }
-  ]
-}

@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0a0a0f">
+  <title>NEURODONE</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/icon-192.svg">
+  <style>
+    :root {
+      --bg-main: #0a0a0f;
+      --bg-card: #14141c;
+      --bg-elevated: #1c1c28;
+      --border-subtle: #2a2a3c;
+      --text-primary: #f5f5f7;
+      --text-secondary: #a1a1aa;
+      --text-muted: #6b6b76;
+      --accent-primary: #6366f1;
+      --accent-glow: #818cf8;
+      --accent-success: #34d399;
+      --accent-warning: #fbbf24;
+      --accent-danger: #f87171;
+      --accent-purple: #8b5cf6;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --safe-top: env(safe-area-inset-top, 20px);
+      --safe-bottom: env(safe-area-inset-bottom, 20px);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; overflow: hidden; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-main); color: var(--text-primary); }
+    #root { height: 100%; }
+    input, button, textarea { font-family: inherit; border: none; outline: none; }
+    
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes bounce { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+    @keyframes confetti { 0% { transform: translateY(0) rotate(0deg); opacity: 1; } 100% { transform: translateY(105vh) rotate(720deg); opacity: 0; } }
+    @keyframes breathe { 0%, 100% { box-shadow: 0 0 20px rgba(139,92,246,0.4); } 50% { box-shadow: 0 0 40px rgba(139,92,246,0.7); } }
+    @keyframes thinking { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+    .slideUp { animation: slideUp 0.3s ease; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    // =============================================
+    // SECURE GEMINI API (Server-Side)
+    // =============================================
+    const GeminiAPI = {
+      async generateChunks(taskName) {
+        try {
+          const response = await fetch('/api/ai', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'generateChunks',
+              data: { taskName }
+            })
+          });
+          
+          const result = await response.json();
+          
+          if (result.success && Array.isArray(result.data)) {
+            return result.data.map(name => ({
+              id: generateId(),
+              name: name,
+              completed: false
+            }));
+          }
+        } catch (error) {
+          console.error('AI API error:', error);
+        }
+        
+        // Fallback to local generation
+        return SmartParser.generateLocalChunks(taskName);
+      },
+
+      async parseVoiceInput(transcript) {
+        try {
+          const response = await fetch('/api/ai', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'parseVoice',
+              data: { transcript }
+            })
+          });
+          
+          const result = await response.json();
+          
+          if (result.success && Array.isArray(result.data)) {
+            return result.data;
+          }
+        } catch (error) {
+          console.error('AI parse error:', error);
+        }
+        
+        // Fallback
+        return [{ name: transcript, deadline: 'today' }];
+      },
+
+      async aiCoachSession(transcript) {
+        try {
+          const response = await fetch('/api/ai', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'coachSession',
+              data: { transcript }
+            })
+          });
+          
+          const result = await response.json();
+          
+          if (result.success && result.data) {
+            return result.data;
+          }
+        } catch (error) {
+          console.error('AI coach error:', error);
+        }
+        
+        return null;
+      },
+
+      // Log data for future model training
+      logInteraction(input, output) {
+        try {
+          const logs = JSON.parse(localStorage.getItem('neurodone_ai_logs') || '[]');
+          logs.push({
+            timestamp: new Date().toISOString(),
+            input,
+            output,
+          });
+          // Keep last 1000 interactions
+          if (logs.length > 1000) logs.shift();
+          localStorage.setItem('neurodone_ai_logs', JSON.stringify(logs));
+        } catch (e) {}
+      }
+    };
+
+    // =============================================
+    // UTILITIES
+    // =============================================
+    const generateId = () => Math.random().toString(36).substr(2, 9);
+    
+    const getDaysUntil = (date) => {
+      const now = new Date(); now.setHours(0,0,0,0);
+      const target = new Date(date); target.setHours(0,0,0,0);
+      return Math.ceil((target - now) / (1000 * 60 * 60 * 24));
+    };
+
+    const getDeadlineDisplay = (date) => {
+      const days = getDaysUntil(date);
+      if (days < 0) return { text: `${Math.abs(days)}d overdue`, color: 'var(--accent-danger)' };
+      if (days === 0) return { text: 'Today', color: 'var(--accent-primary)' };
+      if (days === 1) return { text: 'Tomorrow', color: 'var(--accent-glow)' };
+      if (days <= 3) return { text: `${days} days left`, color: 'var(--accent-success)' };
+      if (days <= 7) return { text: `${days} days left`, color: 'var(--text-secondary)' };
+      return { text: `${days} days left`, color: 'var(--text-muted)' };
+    };
+
+    const formatDateShort = (date) => new Date(date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    const isToday = (date) => new Date(date).toDateString() === new Date().toDateString();
+    const isSameDay = (d1, d2) => new Date(d1).toDateString() === new Date(d2).toDateString();
+    
+    const setDateAt = (days) => { 
+      const d = new Date(); 
+      d.setDate(d.getDate() + days); 
+      d.setHours(23,59,0,0); 
+      return d.toISOString(); 
+    };
+
+    const deadlineFromText = (text) => {
+      const l = text?.toLowerCase() || '';
+      if (l.includes('today') || l.includes('tonight')) return setDateAt(0);
+      if (l.includes('tomorrow')) return setDateAt(1);
+      if (l.includes('3 day') || l.includes('three day')) return setDateAt(3);
+      if (l.includes('next week') || l.includes('week')) return setDateAt(7);
+      return setDateAt(0);
+    };
+
+    // =============================================
+    // LOCAL SMART PARSER (Fallback)
+    // =============================================
+    const SmartParser = {
+      generateLocalChunks(taskName) {
+        const n = taskName.toLowerCase();
+        if (n.includes('homework') || n.includes('study') || n.includes('learn')) return [
+          { id: generateId(), name: 'Gather materials', completed: false },
+          { id: generateId(), name: 'Work through content', completed: false },
+          { id: generateId(), name: 'Review & check', completed: false },
+        ];
+        if (n.includes('meet') || n.includes('call') || n.includes('coffee')) return [
+          { id: generateId(), name: 'Prepare talking points', completed: false },
+          { id: generateId(), name: 'Attend meeting', completed: false },
+          { id: generateId(), name: 'Send follow-up', completed: false },
+        ];
+        if (n.includes('shop') || n.includes('groceries') || n.includes('buy') || n.includes('mall')) return [
+          { id: generateId(), name: 'Make list', completed: false },
+          { id: generateId(), name: 'Go shopping', completed: false },
+          { id: generateId(), name: 'Put away items', completed: false },
+        ];
+        if (n.includes('movie') || n.includes('cinema') || n.includes('netflix') || n.includes('watch')) return [
+          { id: generateId(), name: 'Pick what to watch', completed: false },
+          { id: generateId(), name: 'Get snacks', completed: false },
+          { id: generateId(), name: 'Enjoy!', completed: false },
+        ];
+        if (n.includes('email') || n.includes('reply') || n.includes('respond')) return [
+          { id: generateId(), name: 'Draft response', completed: false },
+          { id: generateId(), name: 'Review & send', completed: false },
+        ];
+        if (n.includes('clean') || n.includes('tidy') || n.includes('organize')) return [
+          { id: generateId(), name: 'Quick declutter', completed: false },
+          { id: generateId(), name: 'Main cleaning', completed: false },
+          { id: generateId(), name: 'Final touches', completed: false },
+        ];
+        return [
+          { id: generateId(), name: 'Get started (2 min)', completed: false },
+          { id: generateId(), name: 'Main work', completed: false },
+          { id: generateId(), name: 'Wrap up', completed: false },
+        ];
+      },
+
+      cleanTaskName(text) {
+        let c = text
+          .replace(/^(hey|hi|hello|ok|okay|so|um|uh|like)\s*/gi, '')
+          .replace(/^(please|can you|could you|i need to|i want to|i have to)\s*/gi, '')
+          .replace(/^(create|add|make|set)\s*(a\s*)?(task|todo|reminder)?\s*(for|about|to)?\s*/gi, '')
+          .replace(/\s+/g, ' ').trim();
+        return c.length > 0 ? c.charAt(0).toUpperCase() + c.slice(1) : text;
+      },
+
+      extractProject(text, projects = []) {
+        const l = text.toLowerCase();
+        for (const p of projects) {
+          if (l.includes(p.name.toLowerCase())) return p.name;
+        }
+        return 'Inbox';
+      }
+    };
+
+    // =============================================
+    // ICONS
+    // =============================================
+    const Icons = {
+      Mic: ({s=24}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>,
+      Check: ({s=18}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="4 12 9 17 20 6"/></svg>,
+      Calendar: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
+      Folder: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>,
+      User: ({s=24}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+      X: ({s=24}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+      Plus: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+      Edit: ({s=18}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+      ChevronRight: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>,
+      ChevronLeft: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>,
+      ChevronDown: ({s=16}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="6 9 12 15 18 9"/></svg>,
+      Zap: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,
+      Clock: ({s=16}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+      Trash: ({s=18}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>,
+      MoreV: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>,
+      Bell: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>,
+      Brain: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24A2.5 2.5 0 0 1 9.5 2"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24A2.5 2.5 0 0 0 14.5 2"/></svg>,
+      Undo: ({s=18}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>,
+      Sparkles: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 3v2m0 14v2M5.6 5.6l1.4 1.4m10 10l1.4 1.4M3 12h2m14 0h2M5.6 18.4l1.4-1.4m10-10l1.4-1.4"/><circle cx="12" cy="12" r="4"/></svg>,
+      Wand: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8L19 13M17.8 6.2L19 5M3 21l9-9M12.2 6.2L11 5"/></svg>,
+      Shield: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
+    };
+
+    // =============================================
+    // CELEBRATION
+    // =============================================
+    const Celebration = ({ show, onDone }) => {
+      useEffect(() => { if (show) { const t = setTimeout(onDone, 2000); return () => clearTimeout(t); } }, [show, onDone]);
+      if (!show) return null;
+      const colors = ['#6366f1','#818cf8','#34d399','#fbbf24','#f87171','#ec4899'];
+      const confetti = Array.from({length:50}, () => ({ left: Math.random()*100, delay: Math.random()*0.5, color: colors[Math.floor(Math.random()*colors.length)], size: 6+Math.random()*8 }));
+      return (
+        <div style={{position:'fixed',inset:0,zIndex:9999,pointerEvents:'none'}}>
+          {confetti.map((c,i) => <div key={i} style={{position:'absolute',left:`${c.left}%`,top:-20,width:c.size,height:c.size,background:c.color,borderRadius:Math.random()>0.5?'50%':'2px',animation:`confetti 2.5s ease-out ${c.delay}s forwards`}} />)}
+          <div style={{position:'absolute',top:'40%',left:'50%',transform:'translate(-50%,-50%)',textAlign:'center'}}>
+            <div style={{fontSize:'72px'}}>🎉</div>
+            <div style={{fontSize:'24px',fontWeight:'700',color:'var(--accent-success)'}}>Amazing!</div>
+          </div>
+        </div>
+      );
+    };
+
+    // =============================================
+    // TOAST
+    // =============================================
+    const Toast = ({ message, action, onAction, onClose }) => {
+      useEffect(() => { const t = setTimeout(onClose, 5000); return () => clearTimeout(t); }, [onClose]);
+      return (
+        <div className="slideUp" style={{position:'fixed',bottom:'160px',left:'20px',right:'20px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',padding:'14px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',boxShadow:'0 8px 32px rgba(0,0,0,0.4)',zIndex:100}}>
+          <span style={{fontSize:'14px'}}>{message}</span>
+          {action && <button onClick={onAction} style={{background:'var(--accent-primary)',padding:'8px 16px',borderRadius:'var(--radius-sm)',color:'white',fontWeight:'600',fontSize:'13px',cursor:'pointer'}}>{action}</button>}
+        </div>
+      );
+    };
+
+    // =============================================
+    // AI THINKING INDICATOR
+    // =============================================
+    const AIThinking = ({ message = "AI is thinking..." }) => (
+      <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'16px',background:'var(--bg-card)',borderRadius:'var(--radius-md)',marginBottom:'12px'}}>
+        <div style={{display:'flex',gap:'4px'}}>
+          {[0,1,2].map(i => (
+            <div key={i} style={{width:'8px',height:'8px',borderRadius:'50%',background:'var(--accent-purple)',animation:`thinking 1s ease-in-out ${i*0.2}s infinite`}} />
+          ))}
+        </div>
+        <span style={{fontSize:'14px',color:'var(--text-secondary)'}}>{message}</span>
+      </div>
+    );
+
+    // =============================================
+    // DEADLINE PICKER
+    // =============================================
+    const DeadlinePicker = ({ current, onSelect, onClose }) => {
+      const info = getDeadlineDisplay(current);
+      const opts = [{label:'Today',icon:'☀️',days:0},{label:'Tomorrow',icon:'🌅',days:1},{label:'In 3 days',icon:'📅',days:3},{label:'Next week',icon:'📆',days:7},{label:'In 2 weeks',icon:'🗓️',days:14}];
+      return (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'flex-end',justifyContent:'center',zIndex:1000}} onClick={onClose}>
+          <div className="slideUp" style={{background:'var(--bg-card)',borderRadius:'20px 20px 0 0',width:'100%',maxWidth:'400px',padding:'24px',paddingBottom:'calc(24px + var(--safe-bottom))'}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'20px'}}>
+              <h3 style={{fontSize:'18px',fontWeight:'600'}}>When do you need this done?</h3>
+              <button onClick={onClose} style={{background:'none',color:'var(--text-muted)',cursor:'pointer',padding:'8px'}}><Icons.X s={20}/></button>
+            </div>
+            <p style={{fontSize:'14px',color:'var(--text-muted)',marginBottom:'20px'}}>Currently: <span style={{color:info.color}}>{info.text}</span></p>
+            <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
+              {opts.map((o,i) => <button key={i} onClick={()=>onSelect(setDateAt(o.days))} style={{display:'flex',alignItems:'center',gap:'16px',padding:'16px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-primary)',fontSize:'16px',cursor:'pointer'}}><span style={{fontSize:'24px'}}>{o.icon}</span><span style={{fontWeight:'500'}}>{o.label}</span></button>)}
+            </div>
+            <p style={{fontSize:'12px',color:'var(--text-muted)',textAlign:'center',marginTop:'16px'}}>No pressure, just planning 💜</p>
+          </div>
+        </div>
+      );
+    };
+
+    // =============================================
+    // EDIT TASK MODAL
+    // =============================================
+    const EditTaskModal = ({ task, projects, onSave, onClose }) => {
+      const [name, setName] = useState(task.name);
+      const [project, setProject] = useState(task.project);
+      const [showPicker, setShowPicker] = useState(false);
+      const allProjects = ['Inbox', ...projects.map(p=>p.name)];
+      return (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'20px'}} onClick={onClose}>
+          <div style={{background:'var(--bg-card)',borderRadius:'var(--radius-lg)',width:'100%',maxWidth:'400px',padding:'24px'}} onClick={e=>e.stopPropagation()}>
+            <h3 style={{fontSize:'18px',fontWeight:'600',marginBottom:'20px'}}>Edit Task</h3>
+            <div style={{marginBottom:'16px'}}>
+              <label style={{fontSize:'13px',color:'var(--text-muted)',marginBottom:'8px',display:'block'}}>Task Name</label>
+              <input value={name} onChange={e=>setName(e.target.value)} style={{width:'100%',padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-primary)',fontSize:'16px'}} />
+            </div>
+            <div style={{marginBottom:'20px'}}>
+              <label style={{fontSize:'13px',color:'var(--text-muted)',marginBottom:'8px',display:'block'}}>Project</label>
+              <button onClick={()=>setShowPicker(!showPicker)} style={{width:'100%',padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-primary)',fontSize:'16px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center'}}>{project}<Icons.ChevronDown/></button>
+              {showPicker && <div style={{marginTop:'8px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',overflow:'hidden'}}>{allProjects.map(p=><button key={p} onClick={()=>{setProject(p);setShowPicker(false);}} style={{width:'100%',padding:'12px 14px',background:project===p?'var(--accent-primary)20':'transparent',color:'var(--text-primary)',cursor:'pointer',textAlign:'left',borderBottom:'1px solid var(--border-subtle)'}}>{p}</button>)}</div>}
+            </div>
+            <div style={{display:'flex',gap:'12px'}}>
+              <button onClick={onClose} style={{flex:1,padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-secondary)',cursor:'pointer'}}>Cancel</button>
+              <button onClick={()=>onSave({...task,name,project})} style={{flex:1,padding:'14px',background:'var(--accent-primary)',borderRadius:'var(--radius-md)',color:'white',fontWeight:'600',cursor:'pointer'}}>Save</button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // =============================================
+    // REGENERATE CHUNKS BUTTON
+    // =============================================
+    const RegenerateChunksButton = ({ taskId, taskName, onNewChunks }) => {
+      const [loading, setLoading] = useState(false);
+      
+      const handleRegenerate = async () => {
+        setLoading(true);
+        const newChunks = await GeminiAPI.generateChunks(taskName);
+        onNewChunks(taskId, newChunks);
+        GeminiAPI.logInteraction({ action: 'regenerate_chunks', task: taskName }, { chunks: newChunks.map(c=>c.name) });
+        setLoading(false);
+      };
+
+      return (
+        <button 
+          onClick={handleRegenerate} 
+          disabled={loading}
+          style={{
+            display:'flex',alignItems:'center',gap:'8px',
+            padding:'10px 14px',marginTop:'12px',
+            background:'linear-gradient(135deg, var(--accent-purple), var(--accent-primary))',
+            borderRadius:'var(--radius-md)',color:'white',
+            fontSize:'13px',fontWeight:'500',cursor:'pointer',
+            opacity: loading ? 0.7 : 1
+          }}
+        >
+          {loading ? (
+            <div style={{width:'16px',height:'16px',border:'2px solid white',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 1s linear infinite'}} />
+          ) : (
+            <Icons.Wand s={16} />
+          )}
+          {loading ? 'Regenerating...' : 'AI: Suggest new steps'}
+        </button>
+      );
+    };
+
+    // =============================================
+    // TASK CARD
+    // =============================================
+    const TaskCard = ({ task, projects, onToggleChunk, onComplete, onDelete, onUpdateDeadline, onEdit, onUndo, onUpdateChunks }) => {
+      const [expanded, setExpanded] = useState(false);
+      const [showDeadline, setShowDeadline] = useState(false);
+      const [showMenu, setShowMenu] = useState(false);
+      const [showEditModal, setShowEditModal] = useState(false);
+      
+      const done = task.chunks.filter(c=>c.completed).length;
+      const total = task.chunks.length;
+      const progress = (done/total)*100;
+      const allDone = done === total;
+      const dl = getDeadlineDisplay(task.deadline);
+
+      return (
+        <>
+          <div style={{background:'var(--bg-card)',borderRadius:'var(--radius-lg)',padding:'16px',marginBottom:'12px',border:`1px solid ${task.completed||allDone?'var(--accent-success)40':'var(--border-subtle)'}`,opacity:task.completed?0.6:1}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'8px'}}>
+              <div style={{flex:1}}>
+                <div style={{fontSize:'11px',fontWeight:'600',color:'var(--accent-primary)',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:'4px'}}>{task.project}</div>
+                <h3 style={{fontSize:'15px',fontWeight:'600',color:task.completed?'var(--text-muted)':'var(--text-primary)',textDecoration:task.completed?'line-through':'none',lineHeight:1.4}}>{task.name}</h3>
+              </div>
+              <div style={{position:'relative'}}>
+                <button onClick={()=>setShowMenu(!showMenu)} style={{background:'none',color:'var(--text-muted)',cursor:'pointer',padding:'4px'}}><Icons.MoreV s={18}/></button>
+                {showMenu && <div style={{position:'absolute',top:'100%',right:0,background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',padding:'8px',minWidth:'160px',boxShadow:'0 8px 32px rgba(0,0,0,0.4)',zIndex:10}}>
+                  <button onClick={()=>{setShowEditModal(true);setShowMenu(false);}} style={{display:'flex',alignItems:'center',gap:'10px',width:'100%',padding:'12px',background:'none',color:'var(--text-primary)',cursor:'pointer',borderRadius:'var(--radius-sm)',fontSize:'14px'}}><Icons.Edit s={16}/>Edit Task</button>
+                  {task.completed && <button onClick={()=>{onUndo(task.id);setShowMenu(false);}} style={{display:'flex',alignItems:'center',gap:'10px',width:'100%',padding:'12px',background:'none',color:'var(--accent-warning)',cursor:'pointer',borderRadius:'var(--radius-sm)',fontSize:'14px'}}><Icons.Undo s={16}/>Undo Complete</button>}
+                  <button onClick={()=>{onDelete(task.id);setShowMenu(false);}} style={{display:'flex',alignItems:'center',gap:'10px',width:'100%',padding:'12px',background:'none',color:'var(--accent-danger)',cursor:'pointer',borderRadius:'var(--radius-sm)',fontSize:'14px'}}><Icons.Trash s={16}/>Delete Task</button>
+                </div>}
+              </div>
+            </div>
+            {!task.completed && <button onClick={()=>setShowDeadline(true)} style={{display:'inline-flex',alignItems:'center',gap:'6px',padding:'6px 12px',background:'var(--bg-elevated)',borderRadius:'20px',fontSize:'13px',color:dl.color,cursor:'pointer',marginBottom:'12px',fontWeight:'500'}}><Icons.Clock s={14}/>{dl.text}<span style={{opacity:0.5,fontSize:'11px'}}>• tap to change</span></button>}
+            <div style={{height:'4px',background:'var(--bg-elevated)',borderRadius:'2px',overflow:'hidden',marginBottom:'12px'}}><div style={{height:'100%',width:`${progress}%`,background:allDone||task.completed?'var(--accent-success)':'linear-gradient(90deg,var(--accent-primary),var(--accent-glow))',transition:'width 0.3s'}}/></div>
+            <button onClick={()=>setExpanded(!expanded)} style={{display:'flex',alignItems:'center',justifyContent:'space-between',width:'100%',padding:'8px 0',background:'none',color:'var(--text-secondary)',cursor:'pointer',fontSize:'13px'}}><span>{done}/{total} steps done</span><span style={{transform:expanded?'rotate(180deg)':'rotate(0)',transition:'transform 0.2s'}}><Icons.ChevronDown/></span></button>
+            {expanded && <div style={{paddingTop:'8px'}}>
+              {task.chunks.map((c,i)=><div key={c.id} onClick={()=>!task.completed&&onToggleChunk(task.id,c.id)} style={{display:'flex',alignItems:'center',gap:'12px',padding:'12px 0',borderBottom:i<total-1?'1px solid var(--border-subtle)':'none',cursor:task.completed?'default':'pointer'}}>
+                <div style={{width:'24px',height:'24px',borderRadius:'6px',border:c.completed?'none':'2px solid var(--border-subtle)',background:c.completed?'var(--accent-success)':'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{c.completed&&<Icons.Check s={14}/>}</div>
+                <span style={{fontSize:'14px',color:c.completed?'var(--text-muted)':'var(--text-primary)',textDecoration:c.completed?'line-through':'none'}}>{c.name}</span>
+              </div>)}
+              
+              {/* AI Regenerate Button */}
+              {!task.completed && (
+                <RegenerateChunksButton 
+                  taskId={task.id} 
+                  taskName={task.name} 
+                  onNewChunks={onUpdateChunks}
+                />
+              )}
+              
+              {allDone && !task.completed && <button onClick={()=>onComplete(task.id)} style={{width:'100%',padding:'14px',marginTop:'12px',background:'linear-gradient(135deg,var(--accent-success),#10b981)',borderRadius:'var(--radius-md)',color:'white',fontSize:'15px',fontWeight:'600',cursor:'pointer',animation:'bounce 2s infinite'}}>Mark Complete 🎉</button>}
+            </div>}
+          </div>
+          {showDeadline && <DeadlinePicker current={task.deadline} onSelect={d=>{onUpdateDeadline(task.id,d);setShowDeadline(false);}} onClose={()=>setShowDeadline(false)}/>}
+          {showEditModal && <EditTaskModal task={task} projects={projects} onSave={t=>{onEdit(t);setShowEditModal(false);}} onClose={()=>setShowEditModal(false)}/>}
+        </>
+      );
+    };
+
+    // =============================================
+    // CALENDAR VIEW
+    // =============================================
+    const CalendarView = ({ tasks, selectedDate, onSelectDate, viewMode, onViewModeChange }) => {
+      const [viewDate, setViewDate] = useState(new Date());
+      const getWeekDays = () => { const days = []; const s = new Date(viewDate); s.setDate(s.getDate()-s.getDay()); for(let i=0;i<7;i++){const d=new Date(s);d.setDate(d.getDate()+i);days.push(d);} return days; };
+      const getMonthDays = () => { const y=viewDate.getFullYear(),m=viewDate.getMonth(),f=new Date(y,m,1).getDay(),d=new Date(y,m+1,0).getDate(),days=[]; for(let i=0;i<f;i++)days.push(null); for(let i=1;i<=d;i++)days.push(new Date(y,m,i)); return days; };
+      const getCount = d => d ? tasks.filter(t=>!t.completed&&isSameDay(t.deadline,d)).length : 0;
+      const nav = delta => { const d = new Date(viewDate); viewMode==='month' ? d.setMonth(d.getMonth()+delta) : d.setDate(d.getDate()+delta*7); setViewDate(d); };
+
+      return (
+        <div style={{marginBottom:'24px'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'16px'}}>
+            <div style={{display:'flex',gap:'8px'}}>
+              {['week','month'].map(m=><button key={m} onClick={()=>onViewModeChange(m)} style={{padding:'8px 16px',background:viewMode===m?'var(--accent-primary)':'var(--bg-elevated)',borderRadius:'var(--radius-sm)',color:viewMode===m?'white':'var(--text-secondary)',fontSize:'13px',cursor:'pointer',textTransform:'capitalize'}}>{m}</button>)}
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+              <button onClick={()=>nav(-1)} style={{background:'none',color:'var(--text-secondary)',cursor:'pointer',padding:'8px'}}><Icons.ChevronLeft s={20}/></button>
+              <span style={{fontSize:'14px',fontWeight:'500',minWidth:'120px',textAlign:'center'}}>{viewDate.toLocaleDateString('en-US',{month:'long',year:'numeric'})}</span>
+              <button onClick={()=>nav(1)} style={{background:'none',color:'var(--text-secondary)',cursor:'pointer',padding:'8px'}}><Icons.ChevronRight s={20}/></button>
+            </div>
+          </div>
+          {viewMode==='week' && <div style={{display:'flex',gap:'8px',overflowX:'auto',padding:'4px 0'}}>
+            {getWeekDays().map((d,i)=>{const c=getCount(d),sel=isSameDay(d,selectedDate),tod=isToday(d); return <button key={i} onClick={()=>onSelectDate(d)} style={{flex:'1 0 auto',minWidth:'52px',padding:'12px 8px',background:sel?'var(--accent-primary)':tod?'var(--bg-elevated)':'var(--bg-card)',borderRadius:'var(--radius-md)',color:sel?'white':'var(--text-primary)',cursor:'pointer',textAlign:'center'}}><div style={{fontSize:'11px',opacity:0.7,marginBottom:'4px'}}>{d.toLocaleDateString('en-US',{weekday:'short'}).toUpperCase()}</div><div style={{fontSize:'18px',fontWeight:'600'}}>{d.getDate()}</div>{c>0&&<div style={{width:'6px',height:'6px',borderRadius:'50%',background:sel?'white':'var(--accent-primary)',margin:'4px auto 0'}}/>}</button>;})}
+          </div>}
+          {viewMode==='month' && <div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:'4px',marginBottom:'8px'}}>{['S','M','T','W','T','F','S'].map((d,i)=><div key={i} style={{textAlign:'center',fontSize:'12px',color:'var(--text-muted)',padding:'8px'}}>{d}</div>)}</div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:'4px'}}>{getMonthDays().map((d,i)=>{if(!d)return<div key={i}/>; const c=getCount(d),sel=isSameDay(d,selectedDate),tod=isToday(d); return <button key={i} onClick={()=>onSelectDate(d)} style={{padding:'10px 4px',background:sel?'var(--accent-primary)':tod?'var(--bg-elevated)':'transparent',borderRadius:'8px',color:sel?'white':'var(--text-primary)',cursor:'pointer',position:'relative',fontSize:'14px'}}>{d.getDate()}{c>0&&!sel&&<div style={{position:'absolute',bottom:'2px',left:'50%',transform:'translateX(-50%)',width:'4px',height:'4px',borderRadius:'50%',background:'var(--accent-primary)'}}/>}</button>;})}</div>
+          </div>}
+        </div>
+      );
+    };
+
+    // =============================================
+    // PROJECT VIEW
+    // =============================================
+    const ProjectView = ({ projects, tasks, onSelectProject, onAddProject, onEditProject, onDeleteProject }) => {
+      const [showAdd, setShowAdd] = useState(false);
+      const [newName, setNewName] = useState('');
+      const [editing, setEditing] = useState(null);
+      const colors = ['#6366f1','#8b5cf6','#ec4899','#f43f5e','#f97316','#eab308','#22c55e','#14b8a6'];
+      const byProject = useMemo(()=>{const g={'Inbox':[]};projects.forEach(p=>g[p.name]=[]);tasks.forEach(t=>{if(!g[t.project])g[t.project]=[];g[t.project].push(t);});return g;},[projects,tasks]);
+
+      return (
+        <div>
+          <button onClick={()=>setShowAdd(true)} style={{display:'flex',alignItems:'center',gap:'12px',width:'100%',padding:'16px',marginBottom:'16px',background:'var(--bg-card)',border:'2px dashed var(--border-subtle)',borderRadius:'var(--radius-lg)',color:'var(--text-secondary)',cursor:'pointer',fontSize:'15px'}}><Icons.Plus s={20}/>Create new project</button>
+          <div onClick={()=>onSelectProject('Inbox')} style={{display:'flex',alignItems:'center',gap:'16px',padding:'16px',marginBottom:'8px',background:'var(--bg-card)',borderRadius:'var(--radius-lg)',cursor:'pointer'}}>
+            <div style={{width:'44px',height:'44px',borderRadius:'12px',background:'#f97316',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'20px'}}>📥</div>
+            <div style={{flex:1}}><div style={{fontWeight:'600',marginBottom:'2px'}}>Inbox</div><div style={{fontSize:'13px',color:'var(--text-muted)'}}>{byProject['Inbox']?.filter(t=>!t.completed).length||0} active tasks</div></div>
+            <Icons.ChevronRight s={20}/>
+          </div>
+          {projects.map((p,i)=>{const pt=byProject[p.name]||[];const active=pt.filter(t=>!t.completed).length;const comp=pt.filter(t=>t.completed).length;return(
+            <div key={p.id} onClick={()=>onSelectProject(p.name)} style={{display:'flex',alignItems:'center',gap:'16px',padding:'16px',marginBottom:'8px',background:'var(--bg-card)',borderRadius:'var(--radius-lg)',cursor:'pointer'}}>
+              <div style={{width:'44px',height:'44px',borderRadius:'12px',background:p.color||colors[i%colors.length],display:'flex',alignItems:'center',justifyContent:'center'}}><Icons.Folder s={22}/></div>
+              <div style={{flex:1}}><div style={{fontWeight:'600',marginBottom:'2px'}}>{p.name}</div><div style={{fontSize:'13px',color:'var(--text-muted)'}}>{active} active • {comp} done</div></div>
+              <button onClick={e=>{e.stopPropagation();setEditing(p);}} style={{background:'none',color:'var(--text-muted)',cursor:'pointer',padding:'8px'}}><Icons.Edit s={16}/></button>
+            </div>
+          );})}
+          {showAdd && <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'20px'}} onClick={()=>setShowAdd(false)}><div style={{background:'var(--bg-card)',borderRadius:'var(--radius-lg)',padding:'24px',width:'100%',maxWidth:'360px'}} onClick={e=>e.stopPropagation()}><h3 style={{fontSize:'18px',fontWeight:'600',marginBottom:'20px'}}>New Project</h3><input autoFocus value={newName} onChange={e=>setNewName(e.target.value)} placeholder="Project name..." style={{width:'100%',padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-primary)',fontSize:'16px',marginBottom:'16px'}}/><div style={{display:'flex',gap:'12px'}}><button onClick={()=>setShowAdd(false)} style={{flex:1,padding:'12px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-secondary)',cursor:'pointer'}}>Cancel</button><button onClick={()=>{if(newName.trim()){onAddProject({id:generateId(),name:newName.trim(),color:colors[projects.length%colors.length]});setNewName('');setShowAdd(false);}}} style={{flex:1,padding:'12px',background:'var(--accent-primary)',borderRadius:'var(--radius-md)',color:'white',fontWeight:'600',cursor:'pointer'}}>Create</button></div></div></div>}
+          {editing && <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'20px'}} onClick={()=>setEditing(null)}><div style={{background:'var(--bg-card)',borderRadius:'var(--radius-lg)',padding:'24px',width:'100%',maxWidth:'360px'}} onClick={e=>e.stopPropagation()}><h3 style={{fontSize:'18px',fontWeight:'600',marginBottom:'20px'}}>Edit Project</h3><input autoFocus value={editing.name} onChange={e=>setEditing({...editing,name:e.target.value})} style={{width:'100%',padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-primary)',fontSize:'16px',marginBottom:'16px'}}/><div style={{display:'flex',gap:'12px'}}><button onClick={()=>{onDeleteProject(editing.id);setEditing(null);}} style={{padding:'12px 16px',background:'var(--accent-danger)',borderRadius:'var(--radius-md)',color:'white',cursor:'pointer',fontWeight:'500'}}>Delete</button><button onClick={()=>setEditing(null)} style={{flex:1,padding:'12px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-secondary)',cursor:'pointer'}}>Cancel</button><button onClick={()=>{onEditProject(editing);setEditing(null);}} style={{flex:1,padding:'12px',background:'var(--accent-primary)',borderRadius:'var(--radius-md)',color:'white',fontWeight:'600',cursor:'pointer'}}>Save</button></div></div></div>}
+        </div>
+      );
+    };
+
+    // =============================================
+    // PROFILE & SETTINGS
+    // =============================================
+    const ProfileSettings = ({ onClose, settings, onUpdateSettings, stats, onClearData }) => {
+      const [section, setSection] = useState('profile');
+      const aiLogs = JSON.parse(localStorage.getItem('neurodone_ai_logs') || '[]');
+      
+      return (
+        <div style={{position:'fixed',inset:0,background:'var(--bg-main)',zIndex:100,overflow:'auto',paddingTop:'var(--safe-top)'}}>
+          <div style={{padding:'20px',maxWidth:'500px',margin:'0 auto'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'24px'}}><h2 style={{fontSize:'24px',fontWeight:'700'}}>{section==='profile'?'Profile':'Settings'}</h2><button onClick={onClose} style={{background:'none',color:'var(--text-muted)',cursor:'pointer',padding:'8px'}}><Icons.X/></button></div>
+            <div style={{display:'flex',gap:'8px',marginBottom:'24px'}}>{['profile','settings'].map(t=><button key={t} onClick={()=>setSection(t)} style={{flex:1,padding:'12px',background:section===t?'var(--accent-primary)':'var(--bg-card)',borderRadius:'var(--radius-md)',color:section===t?'white':'var(--text-secondary)',fontWeight:'500',cursor:'pointer',textTransform:'capitalize'}}>{t}</button>)}</div>
+            
+            {section==='profile' && <>
+              <div style={{display:'flex',alignItems:'center',gap:'16px',padding:'20px',background:'var(--bg-card)',borderRadius:'var(--radius-lg)',marginBottom:'20px'}}><div style={{width:'64px',height:'64px',borderRadius:'50%',background:'linear-gradient(135deg,var(--accent-primary),var(--accent-glow))',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'28px'}}>🧠</div><div><div style={{fontSize:'18px',fontWeight:'600'}}>ADHD Warrior</div><div style={{fontSize:'14px',color:'var(--accent-success)'}}>Pro Member</div></div></div>
+              <div style={{background:'var(--bg-card)',borderRadius:'var(--radius-lg)',padding:'20px',marginBottom:'20px'}}><h3 style={{fontSize:'16px',fontWeight:'600',marginBottom:'16px'}}>Your Stats</h3><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}}>{[{v:stats.completed,l:'Tasks Done',c:'var(--accent-success)'},{v:stats.active,l:'Active Tasks',c:'var(--accent-primary)'},{v:stats.projects,l:'Projects',c:'var(--accent-glow)'},{v:aiLogs.length,l:'AI Interactions',c:'var(--accent-purple)'}].map((s,i)=><div key={i} style={{background:'var(--bg-elevated)',padding:'16px',borderRadius:'var(--radius-md)',textAlign:'center'}}><div style={{fontSize:'28px',fontWeight:'700',color:s.c}}>{s.v}</div><div style={{fontSize:'12px',color:'var(--text-muted)'}}>{s.l}</div></div>)}</div></div>
+              <div style={{background:'var(--bg-card)',borderRadius:'var(--radius-lg)',padding:'20px'}}><h3 style={{fontSize:'16px',fontWeight:'600',marginBottom:'16px'}}>Community</h3><a href="https://discord.gg/neurodone" target="_blank" style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-primary)',textDecoration:'none',marginBottom:'8px'}}><span style={{fontSize:'20px'}}>💬</span>Join Discord</a><a href="mailto:fomagency@gmail.com" style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-primary)',textDecoration:'none'}}><span style={{fontSize:'20px'}}>✉️</span>Contact Ihor</a></div>
+            </>}
+            
+            {section==='settings' && <>
+              <div style={{background:'var(--bg-card)',borderRadius:'var(--radius-lg)',padding:'20px',marginBottom:'20px'}}>
+                <h3 style={{fontSize:'16px',fontWeight:'600',marginBottom:'16px',display:'flex',alignItems:'center',gap:'8px'}}><Icons.Mic s={18}/>Voice Mode</h3>
+                {[{id:'quick',label:'Quick Add',desc:'Single task, instant add',icon:'⚡'},{id:'smart',label:'Smart Parse',desc:'AI cleans up your speech',icon:'✨'},{id:'coach',label:'AI Coach',desc:'Brain dump with Gemini AI',icon:'🧠'}].map(m=><label key={m.id} style={{display:'flex',alignItems:'flex-start',gap:'12px',padding:'14px',background:settings.voiceMode===m.id?'var(--accent-primary)15':'var(--bg-elevated)',borderRadius:'var(--radius-md)',marginBottom:'8px',cursor:'pointer',border:settings.voiceMode===m.id?'1px solid var(--accent-primary)':'1px solid transparent'}}><input type="radio" checked={settings.voiceMode===m.id} onChange={()=>onUpdateSettings({...settings,voiceMode:m.id})} style={{marginTop:'4px'}}/><div style={{flex:1}}><div style={{fontWeight:'500',display:'flex',alignItems:'center',gap:'8px'}}><span>{m.icon}</span>{m.label}</div><div style={{fontSize:'13px',color:'var(--text-muted)'}}>{m.desc}</div></div></label>)}
+              </div>
+              
+              <div style={{background:'var(--bg-card)',borderRadius:'var(--radius-lg)',padding:'20px',marginBottom:'20px'}}>
+                <h3 style={{fontSize:'16px',fontWeight:'600',marginBottom:'16px',display:'flex',alignItems:'center',gap:'8px'}}><Icons.Bell s={18}/>Notifications</h3>
+                {[{id:'reminders',label:'Task Reminders',desc:'Get reminded before deadlines'},{id:'daily',label:'Daily Summary',desc:'Morning overview of your tasks'},{id:'celebrate',label:'Celebrations',desc:'Celebrate when you complete tasks'}].map(n=><div key={n.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',marginBottom:'8px'}}><div><div style={{fontWeight:'500'}}>{n.label}</div><div style={{fontSize:'13px',color:'var(--text-muted)'}}>{n.desc}</div></div><button onClick={()=>onUpdateSettings({...settings,notifications:{...settings.notifications,[n.id]:!settings.notifications?.[n.id]}})} style={{width:'48px',height:'28px',borderRadius:'14px',background:settings.notifications?.[n.id]?'var(--accent-primary)':'var(--border-subtle)',cursor:'pointer',position:'relative'}}><div style={{width:'22px',height:'22px',borderRadius:'50%',background:'white',position:'absolute',top:'3px',left:settings.notifications?.[n.id]?'23px':'3px',transition:'left 0.2s'}}/></button></div>)}
+              </div>
+              
+              <div style={{background:'var(--bg-card)',borderRadius:'var(--radius-lg)',padding:'20px',marginBottom:'20px'}}>
+                <h3 style={{fontSize:'16px',fontWeight:'600',marginBottom:'16px',display:'flex',alignItems:'center',gap:'8px'}}><Icons.Shield s={18}/>AI & Security</h3>
+                <div style={{padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',marginBottom:'8px'}}>
+                  <div style={{fontWeight:'500',marginBottom:'4px',display:'flex',alignItems:'center',gap:'8px'}}>
+                    <span style={{color:'var(--accent-success)'}}>🔒</span> Secure API Mode
+                  </div>
+                  <div style={{fontSize:'13px',color:'var(--accent-success)'}}>✓ API key stored on server</div>
+                  <div style={{fontSize:'12px',color:'var(--text-muted)',marginTop:'4px'}}>Your API key is never exposed to the browser</div>
+                </div>
+                <div style={{padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)'}}>
+                  <div style={{fontWeight:'500',marginBottom:'4px'}}>Training Data Logged</div>
+                  <div style={{fontSize:'13px',color:'var(--text-muted)'}}>{aiLogs.length} interactions saved locally</div>
+                </div>
+              </div>
+              
+              <div style={{background:'var(--bg-card)',borderRadius:'var(--radius-lg)',padding:'20px'}}><h3 style={{fontSize:'16px',fontWeight:'600',marginBottom:'16px'}}>Data</h3><button onClick={()=>confirm('Clear completed tasks?')&&onClearData('completed')} style={{width:'100%',padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-secondary)',cursor:'pointer',marginBottom:'8px',textAlign:'left'}}>Clear completed tasks</button><button onClick={()=>confirm('Clear ALL data?')&&onClearData('all')} style={{width:'100%',padding:'14px',background:'var(--accent-danger)15',borderRadius:'var(--radius-md)',color:'var(--accent-danger)',cursor:'pointer',textAlign:'left'}}>Clear all data</button></div>
+            </>}
+          </div>
+        </div>
+      );
+    };
+
+    // =============================================
+    // VOICE BUTTON WITH GEMINI (SECURE)
+    // =============================================
+    const VoiceButton = ({ onTasksCreated, projects, voiceMode }) => {
+      const [recording, setRecording] = useState(false);
+      const [processing, setProcessing] = useState(false);
+      const [showText, setShowText] = useState(false);
+      const [textVal, setTextVal] = useState('');
+      const [duration, setDuration] = useState(0);
+      const [aiMessage, setAiMessage] = useState('');
+      const recRef = useRef(null);
+      const timerRef = useRef(null);
+
+      const processWithAI = async (transcript) => {
+        setProcessing(true);
+        
+        if (voiceMode === 'coach') {
+          setAiMessage('AI Coach is analyzing your thoughts...');
+          const result = await GeminiAPI.aiCoachSession(transcript);
+          
+          if (result && result.tasks) {
+            // Log for training
+            GeminiAPI.logInteraction({ mode: 'coach', transcript }, result);
+            
+            // Show encouragement briefly
+            if (result.encouragement) {
+              setAiMessage(result.encouragement);
+              await new Promise(r => setTimeout(r, 1500));
+            }
+            
+            // Create tasks with AI-generated chunks
+            const tasks = result.tasks.map(t => ({
+              id: generateId(),
+              name: t.name,
+              project: SmartParser.extractProject(t.name, projects),
+              deadline: deadlineFromText(t.deadline),
+              chunks: t.chunks.map(c => ({ id: generateId(), name: c, completed: false })),
+              completed: false,
+              createdAt: new Date().toISOString(),
+              aiGenerated: true
+            }));
+            
+            onTasksCreated(tasks);
+          }
+        } else if (voiceMode === 'smart') {
+          setAiMessage('Parsing your tasks...');
+          const parsed = await GeminiAPI.parseVoiceInput(transcript);
+          
+          // Log for training
+          GeminiAPI.logInteraction({ mode: 'smart', transcript }, parsed);
+          
+          // Generate AI chunks for each task
+          const tasks = await Promise.all(parsed.map(async (p) => {
+            const chunks = await GeminiAPI.generateChunks(p.name);
+            return {
+              id: generateId(),
+              name: p.name,
+              project: SmartParser.extractProject(p.name, projects),
+              deadline: deadlineFromText(p.deadline),
+              chunks,
+              completed: false,
+              createdAt: new Date().toISOString(),
+              aiGenerated: true
+            };
+          }));
+          
+          onTasksCreated(tasks);
+        } else {
+          // Quick mode - local processing
+          const name = SmartParser.cleanTaskName(transcript);
+          const chunks = SmartParser.generateLocalChunks(name);
+          onTasksCreated([{
+            id: generateId(),
+            name,
+            project: SmartParser.extractProject(transcript, projects),
+            deadline: setDateAt(0),
+            chunks,
+            completed: false,
+            createdAt: new Date().toISOString()
+          }]);
+        }
+        
+        setProcessing(false);
+        setAiMessage('');
+      };
+
+      const start = () => {
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR) { setShowText(true); return; }
+        recRef.current = new SR();
+        recRef.current.continuous = true;
+        recRef.current.interimResults = false;
+        recRef.current.lang = 'en-US';
+        let transcript = '';
+        recRef.current.onresult = e => { for(let i=e.resultIndex;i<e.results.length;i++)if(e.results[i].isFinal)transcript+=e.results[i][0].transcript+' '; };
+        recRef.current.onerror = () => { setRecording(false); clearInterval(timerRef.current); setShowText(true); };
+        recRef.current.onend = async () => { 
+          setRecording(false); 
+          clearInterval(timerRef.current); 
+          if(transcript.trim()) {
+            await processWithAI(transcript.trim());
+          }
+          setDuration(0); 
+        };
+        setRecording(true); setDuration(0); recRef.current.start();
+        timerRef.current = setInterval(()=>setDuration(d=>d+1),1000);
+      };
+      
+      const stop = () => { if(recRef.current)recRef.current.stop(); clearInterval(timerRef.current); };
+      
+      const handleText = async (e) => { 
+        e.preventDefault(); 
+        if(!textVal.trim())return; 
+        await processWithAI(textVal.trim());
+        setTextVal(''); 
+        setShowText(false); 
+      };
+
+      if(showText) return (
+        <div className="slideUp" style={{position:'fixed',bottom:'100px',left:'20px',right:'20px',background:'var(--bg-card)',borderRadius:'var(--radius-lg)',padding:'20px',border:'1px solid var(--border-subtle)',zIndex:50}}>
+          <form onSubmit={handleText}>
+            <textarea autoFocus value={textVal} onChange={e=>setTextVal(e.target.value)} placeholder={voiceMode==='coach'?"Brain dump everything on your mind...":"What do you need to do?"} rows={3} style={{width:'100%',padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-primary)',fontSize:'16px',resize:'none',marginBottom:'12px'}}/>
+            <div style={{display:'flex',gap:'12px'}}>
+              <button type="button" onClick={()=>setShowText(false)} style={{flex:1,padding:'12px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-secondary)',cursor:'pointer'}}>Cancel</button>
+              <button type="submit" disabled={!textVal.trim()||processing} style={{flex:2,padding:'12px',background:textVal.trim()&&!processing?'var(--accent-primary)':'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:textVal.trim()&&!processing?'white':'var(--text-muted)',fontWeight:'600',cursor:textVal.trim()&&!processing?'pointer':'not-allowed'}}>
+                {processing ? 'Processing...' : 'Add Tasks'}
+              </button>
+            </div>
+          </form>
+        </div>
+      );
+
+      return (
+        <>
+          {(processing || aiMessage) && (
+            <div style={{position:'fixed',bottom:'180px',left:'20px',right:'20px',zIndex:45}}>
+              <AIThinking message={aiMessage || 'AI is processing...'} />
+            </div>
+          )}
+          <div style={{position:'fixed',bottom:'100px',left:'50%',transform:'translateX(-50%)',display:'flex',alignItems:'center',gap:'12px',zIndex:40}}>
+            <button onClick={()=>setShowText(true)} style={{width:'48px',height:'48px',borderRadius:'50%',background:'var(--bg-card)',border:'1px solid var(--border-subtle)',color:'var(--text-secondary)',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}><Icons.Edit/></button>
+            <button onClick={recording?stop:start} disabled={processing} style={{width:'72px',height:'72px',borderRadius:'50%',background:recording?'linear-gradient(135deg,#ef4444,#dc2626)':voiceMode==='coach'?'linear-gradient(135deg,#8b5cf6,#6366f1)':'linear-gradient(135deg,var(--accent-primary),var(--accent-glow))',color:'white',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',boxShadow:recording?'0 0 40px rgba(239,68,68,0.5)':'0 4px 24px rgba(99,102,241,0.4)',animation:recording?'pulse 1s infinite':voiceMode==='coach'?'breathe 3s infinite':'none',opacity:processing?0.5:1}}>
+              {processing?<div style={{width:'24px',height:'24px',border:'3px solid white',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 1s linear infinite'}}/>:<>{voiceMode==='coach'&&!recording?<Icons.Brain s={28}/>:<Icons.Mic s={28}/>}{recording&&<span style={{fontSize:'10px',marginTop:'2px'}}>{duration}s</span>}</>}
+            </button>
+          </div>
+        </>
+      );
+    };
+
+    // =============================================
+    // BOTTOM NAV
+    // =============================================
+    const BottomNav = ({ activeTab, onTabChange, onProfileClick }) => {
+      const tabs = [{id:'today',label:'Today',icon:Icons.Zap},{id:'calendar',label:'Calendar',icon:Icons.Calendar},{id:'projects',label:'Projects',icon:Icons.Folder}];
+      return (
+        <nav style={{position:'fixed',bottom:0,left:0,right:0,background:'var(--bg-card)',borderTop:'1px solid var(--border-subtle)',display:'flex',justifyContent:'space-around',padding:'8px 0',paddingBottom:'calc(8px + var(--safe-bottom))',zIndex:30}}>
+          {tabs.map(t=><button key={t.id} onClick={()=>onTabChange(t.id)} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'4px',padding:'8px 20px',background:'none',color:activeTab===t.id?'var(--accent-primary)':'var(--text-muted)',cursor:'pointer'}}><t.icon s={22}/><span style={{fontSize:'11px',fontWeight:activeTab===t.id?'600':'400'}}>{t.label}</span></button>)}
+          <button onClick={onProfileClick} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'4px',padding:'8px 20px',background:'none',color:'var(--text-muted)',cursor:'pointer'}}><Icons.User s={22}/><span style={{fontSize:'11px'}}>Profile</span></button>
+        </nav>
+      );
+    };
+
+    // =============================================
+    // MAIN APP
+    // =============================================
+    const App = () => {
+      const [tasks, setTasks] = useState(()=>{try{return JSON.parse(localStorage.getItem('neurodone_tasks'))||[];}catch{return[];}});
+      const [projects, setProjects] = useState(()=>{try{return JSON.parse(localStorage.getItem('neurodone_projects'))||[];}catch{return[];}});
+      const [settings, setSettings] = useState(()=>{try{return JSON.parse(localStorage.getItem('neurodone_settings'))||{voiceMode:'smart',notifications:{reminders:true,daily:false,celebrate:true}};}catch{return{voiceMode:'smart',notifications:{}};}});
+      const [activeTab, setActiveTab] = useState('today');
+      const [selectedDate, setSelectedDate] = useState(new Date());
+      const [selectedProject, setSelectedProject] = useState(null);
+      const [showProfile, setShowProfile] = useState(false);
+      const [showCelebration, setShowCelebration] = useState(false);
+      const [calendarView, setCalendarView] = useState('week');
+      const [toast, setToast] = useState(null);
+
+      useEffect(()=>{localStorage.setItem('neurodone_tasks',JSON.stringify(tasks));},[tasks]);
+      useEffect(()=>{localStorage.setItem('neurodone_projects',JSON.stringify(projects));},[projects]);
+      useEffect(()=>{localStorage.setItem('neurodone_settings',JSON.stringify(settings));},[settings]);
+      useEffect(()=>{if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});},[]);
+
+      const todayTasks = useMemo(()=>tasks.filter(t=>!t.completed&&(isToday(t.deadline)||getDaysUntil(t.deadline)<0)),[tasks]);
+      const calendarTasks = useMemo(()=>tasks.filter(t=>isSameDay(t.deadline,selectedDate)),[tasks,selectedDate]);
+      const stats = useMemo(()=>({completed:tasks.filter(t=>t.completed).length,active:tasks.filter(t=>!t.completed).length,projects:projects.length}),[tasks,projects]);
+
+      const handleTasksCreated = newTasks => { newTasks.forEach(t=>{if(t.project!=='Inbox'&&!projects.find(p=>p.name===t.project))setProjects(prev=>[...prev,{id:generateId(),name:t.project,color:'#6366f1'}]);}); setTasks(prev=>[...newTasks,...prev]); };
+      const handleToggleChunk = (taskId,chunkId) => setTasks(tasks.map(t=>t.id===taskId?{...t,chunks:t.chunks.map(c=>c.id===chunkId?{...c,completed:!c.completed}:c)}:t));
+      const handleCompleteTask = taskId => { setShowCelebration(true); setTasks(tasks.map(t=>t.id===taskId?{...t,completed:true}:t)); setToast({message:'Task completed!',action:'Undo',taskId}); };
+      const handleUndoComplete = taskId => { setTasks(tasks.map(t=>t.id===taskId?{...t,completed:false}:t)); setToast(null); };
+      const handleDeleteTask = taskId => { if(confirm('Delete this task?'))setTasks(tasks.filter(t=>t.id!==taskId)); };
+      const handleUpdateDeadline = (taskId,d) => setTasks(tasks.map(t=>t.id===taskId?{...t,deadline:d}:t));
+      const handleEditTask = updated => setTasks(tasks.map(t=>t.id===updated.id?updated:t));
+      const handleUpdateChunks = (taskId, newChunks) => setTasks(tasks.map(t=>t.id===taskId?{...t,chunks:newChunks}:t));
+      const handleClearData = type => { if(type==='completed')setTasks(tasks.filter(t=>!t.completed));else{setTasks([]);setProjects([]);localStorage.removeItem('neurodone_ai_logs');} };
+
+      return (
+        <div style={{height:'100%',display:'flex',flexDirection:'column',paddingTop:'var(--safe-top)'}}>
+          <header style={{padding:'20px',paddingBottom:'12px'}}>
+            <p style={{fontSize:'13px',color:'var(--text-muted)',marginBottom:'4px'}}>{new Date().toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})}</p>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <h1 style={{fontSize:'28px',fontWeight:'700'}}>{activeTab==='today'?'Today':activeTab==='calendar'?'Calendar':selectedProject||'Projects'}</h1>
+              {activeTab==='today'&&todayTasks.length>0&&<div style={{padding:'6px 12px',background:'var(--bg-card)',borderRadius:'20px',fontSize:'13px',color:'var(--text-secondary)'}}>{todayTasks.length} tasks</div>}
+              {selectedProject&&<button onClick={()=>setSelectedProject(null)} style={{background:'none',color:'var(--accent-primary)',cursor:'pointer',fontSize:'14px',fontWeight:'500'}}>← Back</button>}
+            </div>
+          </header>
+          <main style={{flex:1,overflow:'auto',padding:'0 20px',paddingBottom:'180px'}}>
+            {activeTab==='today'&&(todayTasks.length===0?<div style={{textAlign:'center',padding:'60px 20px'}}><div style={{fontSize:'64px',marginBottom:'16px'}}>🎯</div><h2 style={{fontSize:'20px',fontWeight:'600',marginBottom:'8px'}}>All clear for today!</h2><p style={{color:'var(--text-muted)'}}>Tap the mic to add tasks</p></div>:todayTasks.map(t=><TaskCard key={t.id} task={t} projects={projects} onToggleChunk={handleToggleChunk} onComplete={handleCompleteTask} onDelete={handleDeleteTask} onUpdateDeadline={handleUpdateDeadline} onEdit={handleEditTask} onUndo={handleUndoComplete} onUpdateChunks={handleUpdateChunks}/>))}
+            {activeTab==='calendar'&&<><CalendarView tasks={tasks} selectedDate={selectedDate} onSelectDate={setSelectedDate} viewMode={calendarView} onViewModeChange={setCalendarView}/><h2 style={{fontSize:'16px',fontWeight:'600',marginBottom:'16px'}}>{formatDateShort(selectedDate)}</h2>{calendarTasks.length===0?<div style={{textAlign:'center',padding:'40px',color:'var(--text-muted)'}}><p>No tasks for this day</p></div>:calendarTasks.map(t=><TaskCard key={t.id} task={t} projects={projects} onToggleChunk={handleToggleChunk} onComplete={handleCompleteTask} onDelete={handleDeleteTask} onUpdateDeadline={handleUpdateDeadline} onEdit={handleEditTask} onUndo={handleUndoComplete} onUpdateChunks={handleUpdateChunks}/>)}</>}
+            {activeTab==='projects'&&!selectedProject&&<ProjectView projects={projects} tasks={tasks} onSelectProject={setSelectedProject} onAddProject={p=>setProjects([...projects,p])} onEditProject={p=>setProjects(projects.map(pr=>pr.id===p.id?p:pr))} onDeleteProject={id=>setProjects(projects.filter(p=>p.id!==id))}/>}
+            {activeTab==='projects'&&selectedProject&&(tasks.filter(t=>t.project===selectedProject).length===0?<div style={{textAlign:'center',padding:'40px',color:'var(--text-muted)'}}><p>No tasks in this project</p></div>:tasks.filter(t=>t.project===selectedProject).map(t=><TaskCard key={t.id} task={t} projects={projects} onToggleChunk={handleToggleChunk} onComplete={handleCompleteTask} onDelete={handleDeleteTask} onUpdateDeadline={handleUpdateDeadline} onEdit={handleEditTask} onUndo={handleUndoComplete} onUpdateChunks={handleUpdateChunks}/>))}
+          </main>
+          <VoiceButton onTasksCreated={handleTasksCreated} projects={projects} voiceMode={settings.voiceMode}/>
+          <BottomNav activeTab={activeTab} onTabChange={t=>{setActiveTab(t);setSelectedProject(null);}} onProfileClick={()=>setShowProfile(true)}/>
+          {showProfile&&<ProfileSettings onClose={()=>setShowProfile(false)} settings={settings} onUpdateSettings={setSettings} stats={stats} onClearData={handleClearData}/>}
+          {toast&&<Toast message={toast.message} action={toast.action} onAction={()=>{handleUndoComplete(toast.taskId);setToast(null);}} onClose={()=>setToast(null)}/>}
+          <Celebration show={showCelebration} onDone={()=>setShowCelebration(false)}/>
+        </div>
+      );
+    };
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>

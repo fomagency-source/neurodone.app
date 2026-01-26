@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0a0a0f">
+  <title>NEURODONE</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/icon-192.svg">
+  <style>
+    :root {
+      --bg-main: #0a0a0f;
+      --bg-card: #14141c;
+      --bg-elevated: #1c1c28;
+      --border-subtle: #2a2a3c;
+      --text-primary: #f5f5f7;
+      --text-secondary: #a1a1aa;
+      --text-muted: #6b6b76;
+      --accent-primary: #6366f1;
+      --accent-glow: #818cf8;
+      --accent-success: #34d399;
+      --accent-warning: #fbbf24;
+      --accent-danger: #f87171;
+      --accent-purple: #8b5cf6;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --safe-top: env(safe-area-inset-top, 20px);
+      --safe-bottom: env(safe-area-inset-bottom, 20px);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; overflow: hidden; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-main); color: var(--text-primary); }
+    #root { height: 100%; display: flex; flex-direction: column; }
+    input, button, textarea { font-family: inherit; border: none; outline: none; }
+    
+    /* Animations */
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.8; transform: scale(1.05); } }
+    @keyframes thinking { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+    @keyframes confetti { 0% { transform: translateY(0) rotate(0deg); opacity: 1; } 100% { transform: translateY(105vh) rotate(720deg); opacity: 0; } }
+    
+    .slideUp { animation: slideUp 0.3s ease; }
+    .fadeIn { animation: fadeIn 0.3s ease; }
+    .pulse { animation: pulse 2s infinite ease-in-out; }
+    
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    // --- UTILITIES ---
+    const generateId = () => Math.random().toString(36).substr(2, 9);
+    const getDaysUntil = (date) => { const now = new Date(); now.setHours(0,0,0,0); const target = new Date(date); target.setHours(0,0,0,0); return Math.ceil((target - now) / (1000 * 60 * 60 * 24)); };
+    const getDeadlineDisplay = (date) => { 
+      const days = getDaysUntil(date); 
+      if (days < 0) return { text: `${Math.abs(days)}d overdue`, color: 'var(--accent-danger)' }; 
+      if (days === 0) return { text: 'Today', color: 'var(--accent-primary)' }; 
+      if (days === 1) return { text: 'Tomorrow', color: 'var(--accent-glow)' }; 
+      if (days <= 3) return { text: `${days} days left`, color: 'var(--accent-success)' };
+      return { text: `${days} days left`, color: 'var(--text-muted)' }; 
+    };
+    const setDateAt = (days) => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(23,59,0,0); return d.toISOString(); };
+
+    // --- ICONS ---
+    const Icons = {
+      Mic: ({s=24}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>,
+      Check: ({s=18}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="4 12 9 17 20 6"/></svg>,
+      Calendar: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
+      Folder: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>,
+      User: ({s=24}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+      X: ({s=24}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+      Edit: ({s=18}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+      ChevronDown: ({s=16}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="6 9 12 15 18 9"/></svg>,
+      Zap: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,
+      Trash: ({s=18}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>,
+      Brain: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24A2.5 2.5 0 0 1 9.5 2"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24A2.5 2.5 0 0 0 14.5 2"/></svg>,
+      Wand: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8L19 13M17.8 6.2L19 5M3 21l9-9M12.2 6.2L11 5"/></svg>,
+    };
+
+    // --- GEMINI API ---
+    const GeminiAPI = {
+      async generateChunks(taskName) {
+        try {
+          const response = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'generateChunks', data: { taskName } }) });
+          const result = await response.json();
+          if (result.success && Array.isArray(result.data)) return result.data.map(name => ({ id: generateId(), name, completed: false }));
+        } catch (e) { console.error('Chunks error:', e); }
+        return [{id:generateId(), name:"Get started", completed:false}, {id:generateId(), name:"Do the work", completed:false}];
+      },
+      async parseVoiceInput(transcript) {
+        try {
+          const response = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'parseVoice', data: { transcript } }) });
+          const result = await response.json();
+          if (result.success && Array.isArray(result.data)) return result.data;
+        } catch (e) { console.error('Parse error:', e); }
+        return [{ name: transcript, deadline: 'today' }];
+      },
+      async aiCoachSession(transcript) {
+        try {
+          const response = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'coachSession', data: { transcript } }) });
+          const result = await response.json();
+          if (result.success && result.data) return result.data;
+        } catch (e) { console.error('Coach error:', e); }
+        return null;
+      }
+    };
+
+    // --- COMPONENTS ---
+
+    const Celebration = ({ show, onDone }) => { 
+      useEffect(() => { if (show) { const t = setTimeout(onDone, 2000); return () => clearTimeout(t); } }, [show, onDone]); 
+      if (!show) return null; 
+      const colors = ['#6366f1','#818cf8','#34d399','#fbbf24','#f87171']; 
+      const confetti = Array.from({length:50}, () => ({ left: Math.random()*100, delay: Math.random()*0.5, color: colors[Math.floor(Math.random()*colors.length)], size: 6+Math.random()*8 })); 
+      return <div style={{position:'fixed',inset:0,zIndex:9999,pointerEvents:'none'}}>{confetti.map((c,i) => <div key={i} style={{position:'absolute',left:`${c.left}%`,top:-20,width:c.size,height:c.size,background:c.color,borderRadius:Math.random()>0.5?'50%':'2px',animation:`confetti 2.5s ease-out ${c.delay}s forwards`}} />)}<div style={{position:'absolute',top:'40%',left:'50%',transform:'translate(-50%,-50%)',textAlign:'center'}}><div style={{fontSize:'72px'}}>🎉</div><div style={{fontSize:'24px',fontWeight:'700',color:'var(--accent-success)'}}>Amazing!</div></div></div>; 
+    };
+
+    const Toast = ({ message, action, onAction, onClose }) => {
+      useEffect(() => { const t = setTimeout(onClose, 5000); return () => clearTimeout(t); }, [onClose]);
+      return <div className="slideUp" style={{position:'fixed',bottom:'100px',left:'20px',right:'20px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',padding:'14px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',boxShadow:'0 8px 32px rgba(0,0,0,0.4)',zIndex:100}}><span style={{fontSize:'14px'}}>{message}</span>{action && <button onClick={onAction} style={{background:'var(--accent-primary)',padding:'8px 16px',borderRadius:'var(--radius-sm)',color:'white',fontWeight:'600',fontSize:'13px',cursor:'pointer'}}>{action}</button>}</div>;
+    };
+
+    const AIThinking = () => <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'16px',background:'var(--bg-card)',borderRadius:'var(--radius-md)',marginBottom:'12px'}}><div style={{display:'flex',gap:'4px'}}>{[0,1,2].map(i => <div key={i} style={{width:'8px',height:'8px',borderRadius:'50%',background:'var(--accent-purple)',animation:`thinking 1s ease-in-out ${i*0.2}s infinite`}} />)}</div><span style={{fontSize:'14px',color:'var(--text-secondary)'}}>Processing...</span></div>;
+
+    const AICoachResultModal = ({ result, onConfirm, onClose }) => {
+      if (!result) return null;
+      return (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.85)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'20px'}} onClick={onClose}>
+          <div className="slideUp" style={{background:'var(--bg-card)',borderRadius:'var(--radius-lg)',width:'100%',maxWidth:'420px',maxHeight:'80vh',overflow:'auto',padding:'24px'}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:'flex',alignItems:'center',gap:'12px',marginBottom:'20px'}}>
+              <div style={{width:'48px',height:'48px',borderRadius:'50%',background:'linear-gradient(135deg,var(--accent-purple),var(--accent-primary))',display:'flex',alignItems:'center',justifyContent:'center'}}><Icons.Brain s={24}/></div>
+              <div><h3 style={{fontSize:'18px',fontWeight:'600'}}>AI Coach Plan</h3></div>
+            </div>
+            {result.encouragement && <div style={{padding:'16px',background:'rgba(139,92,246,0.1)',borderRadius:'var(--radius-md)',marginBottom:'20px',borderLeft:'4px solid var(--accent-purple)'}}><p style={{fontSize:'15px',fontStyle:'italic',color:'var(--text-primary)'}}>{result.encouragement}</p></div>}
+            <div style={{display:'flex',flexDirection:'column',gap:'10px',marginBottom:'24px'}}>
+              {result.tasks?.map((task, i) => (
+                <div key={i} style={{padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)'}}>
+                  <div style={{fontWeight:'600',marginBottom:'6px'}}>{task.name}</div>
+                  <div style={{fontSize:'12px',color:'var(--accent-primary)',marginBottom:'8px'}}>📅 {task.deadline || 'Today'}</div>
+                  {task.chunks && <div style={{fontSize:'12px',color:'var(--text-muted)'}}>{task.chunks.map((s,j)=> <span key={j}>• {s}<br/></span>)}</div>}
+                </div>
+              ))}
+            </div>
+            <div style={{display:'flex',gap:'12px'}}>
+              <button onClick={onClose} style={{flex:1,padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-secondary)'}}>Cancel</button>
+              <button onClick={onConfirm} style={{flex:2,padding:'14px',background:'var(--accent-primary)',borderRadius:'var(--radius-md)',color:'white',fontWeight:'600'}}>Accept Plan</button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const EditTaskModal = ({ task, projects, onSave, onClose }) => {
+      const [name, setName] = useState(task.name);
+      const [project, setProject] = useState(task.project || 'Inbox');
+      const allProjects = ['Inbox', ...projects.map(p=>p.name)];
+      return (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'20px'}} onClick={onClose}>
+          <div style={{background:'var(--bg-card)',borderRadius:'var(--radius-lg)',width:'100%',maxWidth:'400px',padding:'24px'}} onClick={e=>e.stopPropagation()}>
+            <h3 style={{fontSize:'18px',fontWeight:'600',marginBottom:'20px'}}>Edit Task</h3>
+            <div style={{marginBottom:'16px'}}>
+              <label style={{fontSize:'13px',color:'var(--text-muted)',marginBottom:'8px',display:'block'}}>Task Name</label>
+              <input value={name} onChange={e=>setName(e.target.value)} style={{width:'100%',padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-primary)',fontSize:'16px'}} />
+            </div>
+            <div style={{marginBottom:'20px'}}>
+              <label style={{fontSize:'13px',color:'var(--text-muted)',marginBottom:'8px',display:'block'}}>Project</label>
+              <div style={{display:'flex',flexWrap:'wrap',gap:'8px'}}>
+                {allProjects.map(p => (
+                  <button key={p} onClick={()=>setProject(p)} style={{padding:'8px 12px',borderRadius:'8px',fontSize:'13px',background:project===p?'var(--accent-primary)':'var(--bg-elevated)',color:project===p?'white':'var(--text-secondary)'}}>{p}</button>
+                ))}
+              </div>
+            </div>
+            <div style={{display:'flex',gap:'12px'}}>
+              <button onClick={onClose} style={{flex:1,padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-secondary)'}}>Cancel</button>
+              <button onClick={() => onSave({...task, name, project})} style={{flex:2,padding:'14px',background:'var(--accent-primary)',borderRadius:'var(--radius-md)',color:'white',fontWeight:'600'}}>Save Changes</button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const TaskCard = ({ task, projects, onToggleChunk, onComplete, onDelete, onUpdateDeadline, onEdit, onUpdateChunks }) => {
+      const deadline = getDeadlineDisplay(task.deadline);
+      const projName = task.project || 'Inbox';
+      return (
+        <div className="task-item" style={{marginBottom:'12px', background:'var(--bg-card)', borderRadius:'var(--radius-md)', overflow:'hidden', opacity: task.completed ? 0.6 : 1}}>
+          <div style={{padding:'16px', display:'flex', gap:'12px'}}>
+            <button onClick={() => onComplete(task.id)} style={{width:'24px', height:'24px', borderRadius:'6px', border:`2px solid ${task.completed ? 'var(--accent-success)' : 'var(--border-subtle)'}`, background: task.completed ? 'var(--accent-success)' : 'transparent', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--bg-main)', flexShrink:0}}>
+              {task.completed && <Icons.Check s={14}/>}
+            </button>
+            <div style={{flex:1}} onClick={() => onEdit(task)}>
+              <div style={{textDecoration: task.completed ? 'line-through' : 'none', fontSize:'16px', marginBottom:'6px'}}>{task.name}</div>
+              <div style={{display:'flex',gap:'10px',alignItems:'center'}}>
+                 {projName !== 'Inbox' && <span style={{fontSize:'11px', color:'var(--text-muted)', background:'var(--bg-elevated)', padding:'2px 6px', borderRadius:'4px'}}>{projName}</span>}
+                 <span style={{fontSize:'12px', color: deadline.color, background:'rgba(255,255,255,0.05)', padding:'2px 6px', borderRadius:'4px'}}>{deadline.text}</span>
+                 {!task.chunks?.length && !task.completed && (
+                   <button onClick={(e) => { e.stopPropagation(); onUpdateChunks(task.id, task.name); }} style={{fontSize:'11px', color:'var(--accent-purple)', display:'flex', alignItems:'center', gap:'3px', background:'rgba(139,92,246,0.1)', padding:'2px 6px', borderRadius:'4px'}}>
+                     <Icons.Wand s={10}/> AI Plan
+                   </button>
+                 )}
+              </div>
+            </div>
+          </div>
+          {task.chunks && task.chunks.length > 0 && !task.completed && (
+            <div style={{background:'var(--bg-elevated)', padding:'8px 16px 16px', borderTop:'1px solid var(--border-subtle)'}}>
+              <div style={{fontSize:'11px', fontWeight:'700', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'8px'}}>Micro-steps</div>
+              {task.chunks.map(chunk => (
+                <div key={chunk.id} onClick={() => onToggleChunk(task.id, chunk.id)} style={{display:'flex', alignItems:'center', gap:'10px', padding:'6px 0', opacity: chunk.completed ? 0.5 : 1, cursor:'pointer'}}>
+                  <div style={{width:'6px', height:'6px', borderRadius:'50%', background: chunk.completed ? 'var(--accent-success)' : 'var(--text-muted)'}} />
+                  <span style={{fontSize:'13px', textDecoration: chunk.completed ? 'line-through' : 'none'}}>{chunk.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    const VoiceButton = ({ onTasksCreated, onCoachResult, voiceMode }) => {
+      const [recording, setRecording] = useState(false);
+      
+      const startListening = () => {
+        if (!('webkitSpeechRecognition' in window)) return alert("Voice not supported");
+        const recognition = new window.webkitSpeechRecognition();
+        recognition.onstart = () => setRecording(true);
+        recognition.onend = () => setRecording(false);
+        recognition.onresult = async (e) => {
+          const text = e.results[0][0].transcript;
+          if (voiceMode === 'simple') {
+            onTasksCreated([{id:generateId(), name: text.charAt(0).toUpperCase()+text.slice(1), deadline: setDateAt(0), project:'Inbox'}]);
+          } else if (voiceMode === 'smart') {
+            const tasks = await GeminiAPI.parseVoiceInput(text);
+            onTasksCreated(tasks.map(t => ({...t, id:generateId(), project:'Inbox'})));
+          } else if (voiceMode === 'coach') {
+            const result = await GeminiAPI.aiCoachSession(text);
+            onCoachResult(result);
+          }
+        };
+        recognition.start();
+      };
+
+      return (
+        <div style={{position:'fixed', bottom:'90px', left:'50%', transform:'translateX(-50%)', zIndex:50}}>
+          <button onClick={startListening} className={recording ? 'pulse' : ''} style={{width:'64px', height:'64px', borderRadius:'50%', background: recording ? 'var(--accent-danger)' : 'var(--accent-primary)', color:'white', boxShadow:'0 8px 32px rgba(99,102,241,0.4)', display:'flex', alignItems:'center', justifyContent:'center'}}>
+            <Icons.Mic s={28}/>
+          </button>
+        </div>
+      );
+    };
+
+    const BottomNav = ({ activeTab, onTabChange, onProfileClick }) => (
+      <div style={{position:'fixed', bottom:0, left:0, right:0, background:'var(--bg-elevated)', borderTop:'1px solid var(--border-subtle)', padding:'10px 20px 30px', display:'flex', justifyContent:'space-around', zIndex:40}}>
+        <button onClick={()=>onTabChange('inbox')} style={{color:activeTab==='inbox'?'var(--accent-primary)':'var(--text-muted)', display:'flex', flexDirection:'column', alignItems:'center', gap:'4px'}}>
+          <Icons.Check s={22}/> <span style={{fontSize:'10px',fontWeight:'600'}}>Tasks</span>
+        </button>
+        <div style={{width:'40px'}}></div>
+        <button onClick={()=>onTabChange('projects')} style={{color:activeTab==='projects'?'var(--accent-primary)':'var(--text-muted)', display:'flex', flexDirection:'column', alignItems:'center', gap:'4px'}}>
+          <Icons.Folder s={22}/> <span style={{fontSize:'10px',fontWeight:'600'}}>Projects</span>
+        </button>
+        <button onClick={onProfileClick} style={{color:'var(--text-muted)', display:'flex', flexDirection:'column', alignItems:'center', gap:'4px'}}>
+          <Icons.User s={22}/> <span style={{fontSize:'10px',fontWeight:'600'}}>You</span>
+        </button>
+      </div>
+    );
+
+    const ProfileSettings = ({ onClose, settings, onUpdateSettings, stats, onClearData }) => (
+      <div className="slideUp" style={{position:'fixed', inset:0, background:'var(--bg-main)', zIndex:100, padding:'20px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'30px'}}>
+          <h2 style={{fontSize:'24px',fontWeight:'700'}}>Profile & Settings</h2>
+          <button onClick={onClose} style={{background:'var(--bg-elevated)',padding:'8px',borderRadius:'50%',color:'var(--text-primary)'}}><Icons.X/></button>
+        </div>
+        <div style={{background:'var(--bg-card)', borderRadius:'var(--radius-md)', padding:'20px', marginBottom:'20px', display:'flex', gap:'20px'}}>
+          <div style={{flex:1, textAlign:'center'}}>
+            <div style={{fontSize:'24px', fontWeight:'800', color:'var(--accent-success)'}}>{stats.completed}</div>
+            <div style={{fontSize:'12px', color:'var(--text-muted)'}}>Done</div>
+          </div>
+          <div style={{flex:1, textAlign:'center', borderLeft:'1px solid var(--border-subtle)'}}>
+            <div style={{fontSize:'24px', fontWeight:'800', color:'var(--accent-primary)'}}>{stats.pending}</div>
+            <div style={{fontSize:'12px', color:'var(--text-muted)'}}>Pending</div>
+          </div>
+        </div>
+        <h3 style={{fontSize:'16px',fontWeight:'600',color:'var(--text-muted)',marginBottom:'12px',textTransform:'uppercase'}}>Voice Mode</h3>
+        <div style={{background:'var(--bg-elevated)', borderRadius:'var(--radius-md)', overflow:'hidden', marginBottom:'30px'}}>
+          {['simple','smart','coach'].map(mode => (
+            <button key={mode} onClick={()=>onUpdateSettings({...settings, voiceMode:mode})} style={{width:'100%', padding:'16px', display:'flex', justifyContent:'space-between', alignItems:'center', background:'transparent', borderBottom:'1px solid var(--border-subtle)', color:'var(--text-primary)'}}>
+              <div style={{textAlign:'left'}}>
+                <div style={{fontWeight:'600', textTransform:'capitalize'}}>{mode} Mode</div>
+                <div style={{fontSize:'12px', color:'var(--text-muted)'}}>
+                  {mode==='simple' ? 'Just record tasks exactly as spoken' : mode==='smart' ? 'AI splits and organizes tasks automatically' : 'Vent to AI and get a structured plan'}
+                </div>
+              </div>
+              {settings.voiceMode === mode && <Icons.Check s={16} color="var(--accent-primary)"/>}
+            </button>
+          ))}
+        </div>
+        <button onClick={onClearData} style={{width:'100%', padding:'16px', background:'rgba(248,113,113,0.1)', color:'var(--accent-danger)', borderRadius:'var(--radius-md)', fontWeight:'600'}}>Reset All Data</button>
+      </div>
+    );
+
+    // --- MAIN APP ---
+    const App = () => {
+      const [tasks, setTasks] = useState([]);
+      const [projects, setProjects] = useState([{id:'p1', name:'Work'}, {id:'p2', name:'Personal'}]);
+      const [activeTab, setActiveTab] = useState('inbox');
+      const [selectedProject, setSelectedProject] = useState(null);
+      const [settings, setSettings] = useState({ voiceMode: 'smart' });
+      const [showProfile, setShowProfile] = useState(false);
+      const [toast, setToast] = useState(null);
+      const [showCelebration, setShowCelebration] = useState(false);
+      const [editingTask, setEditingTask] = useState(null);
+      const [coachResult, setCoachResult] = useState(null);
+      const [isProcessing, setIsProcessing] = useState(false);
+
+      useEffect(() => {
+        const t = localStorage.getItem('neurodone_tasks');
+        const p = localStorage.getItem('neurodone_projects');
+        const s = localStorage.getItem('neurodone_settings');
+        if (t) setTasks(JSON.parse(t));
+        if (p) setProjects(JSON.parse(p));
+        if (s) setSettings(JSON.parse(s));
+      }, []);
+
+      useEffect(() => {
+        localStorage.setItem('neurodone_tasks', JSON.stringify(tasks));
+        localStorage.setItem('neurodone_projects', JSON.stringify(projects));
+        localStorage.setItem('neurodone_settings', JSON.stringify(settings));
+      }, [tasks, projects, settings]);
+
+      const handleTasksCreated = (newTasks) => {
+        setTasks(prev => [...newTasks, ...prev]);
+        setToast({ message: `Added ${newTasks.length} task(s)` });
+      };
+      
+      const handleCoachResult = (result) => setCoachResult(result);
+      
+      const handleAcceptCoachPlan = () => {
+        if (!coachResult) return;
+        const newTasks = coachResult.tasks.map(t => ({
+          id: generateId(),
+          name: t.name,
+          deadline: t.deadline === 'tomorrow' ? setDateAt(1) : setDateAt(0),
+          project: 'Inbox',
+          completed: false,
+          chunks: t.chunks ? t.chunks.map(c => ({id: generateId(), name: c, completed: false})) : []
+        }));
+        setTasks(prev => [...newTasks, ...prev]);
+        setCoachResult(null);
+        setToast({ message: "Coach plan applied!" });
+      };
+
+      const handleCompleteTask = (id) => {
+        setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
+        const task = tasks.find(t => t.id === id);
+        if (task && !task.completed) setShowCelebration(true);
+      };
+      
+      const handleToggleChunk = (taskId, chunkId) => {
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, chunks: t.chunks.map(c => c.id === chunkId ? {...c, completed: !c.completed} : c) } : t));
+      };
+      
+      const handleUpdateChunks = async (taskId, taskName) => {
+        setIsProcessing(true);
+        const chunks = await GeminiAPI.generateChunks(taskName);
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, chunks } : t));
+        setIsProcessing(false);
+      };
+
+      const stats = {
+        completed: tasks.filter(t => t.completed).length,
+        pending: tasks.filter(t => !t.completed).length
+      };
+
+      const filteredTasks = activeTab === 'projects' && selectedProject 
+        ? tasks.filter(t => t.project === selectedProject)
+        : tasks.filter(t => !t.completed); // Default inbox view hides completed
+
+      return (
+        <div style={{display:'flex', flexDirection:'column', height:'100%'}}>
+          {/* Header */}
+          <div style={{padding:'20px 20px 10px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+            <h1 style={{fontSize:'24px', fontWeight:'800'}}>Neurodone</h1>
+            <div style={{width:'32px',height:'32px',borderRadius:'50%',background:'var(--bg-elevated)',display:'flex',alignItems:'center',justifyContent:'center'}}><Icons.Brain/></div>
+          </div>
+
+          <main style={{flex:1, overflowY:'auto', padding:'0 20px 100px'}}>
+             {isProcessing && <AIThinking />}
+             
+             {activeTab === 'projects' && !selectedProject && (
+               <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
+                 {projects.map(p => (
+                   <div key={p.id} onClick={()=>setSelectedProject(p.name)} style={{padding:'20px', background:'var(--bg-elevated)', borderRadius:'var(--radius-md)', textAlign:'center'}}>
+                     <Icons.Folder s={32}/>
+                     <div style={{marginTop:'8px', fontWeight:'600'}}>{p.name}</div>
+                     <div style={{fontSize:'12px', color:'var(--text-muted)'}}>{tasks.filter(t=>t.project===p.name && !t.completed).length} tasks</div>
+                   </div>
+                 ))}
+                 <button onClick={()=>{
+                   const n = prompt("Project Name:"); 
+                   if(n) setProjects([...projects, {id:generateId(), name:n}]);
+                 }} style={{padding:'20px', border:'2px dashed var(--border-subtle)', borderRadius:'var(--radius-md)', color:'var(--text-muted)'}}>
+                   <Icons.Plus/>
+                   <div style={{fontSize:'12px', marginTop:'4px'}}>New Project</div>
+                 </button>
+               </div>
+             )}
+
+             {(activeTab === 'inbox' || selectedProject) && (
+               <>
+                 {activeTab === 'projects' && <button onClick={()=>setSelectedProject(null)} style={{marginBottom:'16px', color:'var(--text-muted)', display:'flex', alignItems:'center', gap:'4px'}}><Icons.ChevronDown style={{transform:'rotate(90deg)'}}/> Back to Projects</button>}
+                 
+                 {filteredTasks.length === 0 && (
+                   <div style={{textAlign:'center', padding:'40px', color:'var(--text-muted)'}}>
+                     <p>No pending tasks here.</p>
+                   </div>
+                 )}
+                 
+                 {filteredTasks.map(t => (
+                   <TaskCard 
+                     key={t.id} 
+                     task={t} 
+                     projects={projects}
+                     onComplete={handleCompleteTask}
+                     onToggleChunk={handleToggleChunk}
+                     onUpdateChunks={handleUpdateChunks}
+                     onEdit={setEditingTask}
+                   />
+                 ))}
+               </>
+             )}
+          </main>
+
+          <VoiceButton 
+            voiceMode={settings.voiceMode} 
+            onTasksCreated={handleTasksCreated} 
+            onCoachResult={handleCoachResult} 
+          />
+          
+          <BottomNav activeTab={activeTab} onTabChange={setActiveTab} onProfileClick={()=>setShowProfile(true)} />
+          
+          {/* Modals */}
+          {showProfile && <ProfileSettings onClose={()=>setShowProfile(false)} settings={settings} onUpdateSettings={setSettings} stats={stats} onClearData={()=>{if(confirm("Reset?")) {setTasks([]);localStorage.clear();}}} />}
+          
+          {editingTask && (
+            <EditTaskModal 
+              task={editingTask} 
+              projects={projects} 
+              onClose={()=>setEditingTask(null)} 
+              onSave={(updated)=>{ setTasks(prev=>prev.map(t=>t.id===updated.id?updated:t)); setEditingTask(null); }} 
+            />
+          )}
+
+          <AICoachResultModal result={coachResult} onConfirm={handleAcceptCoachPlan} onClose={()=>setCoachResult(null)} />
+          
+          {toast && <Toast message={toast.message} onClose={()=>setToast(null)} />}
+          <Celebration show={showCelebration} onDone={()=>setShowCelebration(false)} />
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0a0a0f">
+  <title>NEURODONE</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧠</text></svg>">
+  <style>
+    :root {
+      --bg-main: #0a0a0f;
+      --bg-card: #14141c;
+      --bg-elevated: #1c1c28;
+      --border-subtle: #2a2a3c;
+      --text-primary: #f5f5f7;
+      --text-secondary: #a1a1aa;
+      --text-muted: #6b6b76;
+      --accent-primary: #6366f1;
+      --accent-glow: #818cf8;
+      --accent-success: #34d399;
+      --accent-warning: #fbbf24;
+      --accent-danger: #f87171;
+      --accent-purple: #8b5cf6;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --safe-top: env(safe-area-inset-top, 20px);
+      --safe-bottom: env(safe-area-inset-bottom, 20px);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; overflow: hidden; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg-main); color: var(--text-primary); }
+    #root { height: 100%; display: flex; flex-direction: column; }
+    input, button, textarea { font-family: inherit; border: none; outline: none; }
+    
+    /* Animations */
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    @keyframes thinking { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+    @keyframes confetti { 0% { transform: translateY(0) rotate(0deg); opacity: 1; } 100% { transform: translateY(105vh) rotate(720deg); opacity: 0; } }
+
+    .slideUp { animation: slideUp 0.3s ease; }
+    .fadeIn { animation: fadeIn 0.3s ease; }
+    
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: var(--border-subtle); borderRadius: 4px; }
+    
+    .mode-btn { transition: all 0.2s; opacity: 0.6; }
+    .mode-btn.active { opacity: 1; transform: scale(1.05); }
+    .task-item { transition: transform 0.2s; }
+    .task-item:active { transform: scale(0.98); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    // --- UTILS & ID GENERATION ---
+    const generateId = () => Math.random().toString(36).substr(2, 9);
+    const getDaysUntil = (date) => { const now = new Date(); now.setHours(0,0,0,0); const target = new Date(date); target.setHours(0,0,0,0); return Math.ceil((target - now) / (1000 * 60 * 60 * 24)); };
+    const setDateAt = (days) => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(23,59,0,0); return d.toISOString(); };
+    const getDeadlineDisplay = (date) => { 
+      const days = getDaysUntil(date); 
+      if (days < 0) return { text: `${Math.abs(days)}d overdue`, color: 'var(--accent-danger)' }; 
+      if (days === 0) return { text: 'Today', color: 'var(--accent-primary)' }; 
+      if (days === 1) return { text: 'Tomorrow', color: 'var(--accent-glow)' }; 
+      return { text: `${days} days left`, color: 'var(--text-muted)' }; 
+    };
+
+    // --- ICONS ---
+    const Icons = {
+      Mic: ({s=24}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>,
+      Check: ({s=18}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="4 12 9 17 20 6"/></svg>,
+      Brain: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24A2.5 2.5 0 0 1 9.5 2"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24A2.5 2.5 0 0 0 14.5 2"/></svg>,
+      Plus: ({s=20}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+      Trash: ({s=18}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>,
+      X: ({s=24}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+      ChevronDown: ({s=16}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="6 9 12 15 18 9"/></svg>,
+      Wand: ({s=18}) => <svg width={s} height={s} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8L19 13M17.8 6.2L19 5M3 21l9-9M12.2 6.2L11 5"/></svg>,
+    };
+
+    // --- API HANDLER ---
+    const GeminiAPI = {
+      async generateChunks(taskName) {
+        try {
+          const response = await fetch('/api/ai', { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ action: 'generateChunks', data: { taskName } }) 
+          });
+          const result = await response.json();
+          // The new server returns strictly { success: true, data: ["step1", "step2"] }
+          if (result.success && Array.isArray(result.data)) return result.data.map(name => ({ id: generateId(), name, completed: false }));
+        } catch (e) { console.error('Chunks error:', e); }
+        // Fallback
+        return [{ id: generateId(), name: 'Get started (2 min)', completed: false }, { id: generateId(), name: 'Do the work', completed: false }];
+      },
+      async parseVoiceInput(transcript) {
+        try {
+          const response = await fetch('/api/ai', { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ action: 'parseVoice', data: { transcript } }) 
+          });
+          const result = await response.json();
+          if (result.success && Array.isArray(result.data)) return result.data;
+        } catch (e) { console.error('Parse error:', e); }
+        return [{ name: transcript, deadline: 'today' }];
+      },
+      async aiCoachSession(transcript) {
+        try {
+          const response = await fetch('/api/ai', { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ action: 'coachSession', data: { transcript } }) 
+          });
+          const result = await response.json();
+          if (result.success && result.data) return result.data;
+        } catch (e) { console.error('Coach error:', e); }
+        return null;
+      }
+    };
+
+    // --- COMPONENTS ---
+
+    const Celebration = ({ show, onDone }) => { 
+      useEffect(() => { 
+        if (show) { const t = setTimeout(onDone, 2000); return () => clearTimeout(t); } 
+      }, [show, onDone]); 
+      if (!show) return null; 
+      const colors = ['#6366f1','#818cf8','#34d399','#fbbf24','#f87171']; 
+      const confetti = Array.from({length:50}, () => ({ left: Math.random()*100, delay: Math.random()*0.5, color: colors[Math.floor(Math.random()*colors.length)], size: 6+Math.random()*8 })); 
+      return (
+        <div style={{position:'fixed',inset:0,zIndex:9999,pointerEvents:'none'}}>
+          {confetti.map((c,i) => <div key={i} style={{position:'absolute',left:`${c.left}%`,top:-20,width:c.size,height:c.size,background:c.color,borderRadius:Math.random()>0.5?'50%':'2px',animation:`confetti 2.5s ease-out ${c.delay}s forwards`}} />)}
+          <div style={{position:'absolute',top:'40%',left:'50%',transform:'translate(-50%,-50%)',textAlign:'center'}}>
+            <div style={{fontSize:'72px'}}>🎉</div>
+            <div style={{fontSize:'24px',fontWeight:'700',color:'var(--accent-success)'}}>Nice Work!</div>
+          </div>
+        </div>
+      );
+    };
+
+    const AIThinking = () => (
+      <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'16px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',marginBottom:'12px',borderLeft:'3px solid var(--accent-purple)'}}>
+        <div style={{display:'flex',gap:'4px'}}>
+          {[0,1,2].map(i => <div key={i} style={{width:'8px',height:'8px',borderRadius:'50%',background:'var(--accent-purple)',animation:`thinking 1s ease-in-out ${i*0.2}s infinite`}} />)}
+        </div>
+        <span style={{fontSize:'14px',color:'var(--text-secondary)'}}>Neurodone is processing...</span>
+      </div>
+    );
+
+    const DeadlinePicker = ({ current, onSelect, onClose }) => { 
+      const opts = [
+        {label:'Today', days:0, icon:'☀️'},
+        {label:'Tomorrow', days:1, icon:'🌅'},
+        {label:'3 Days', days:3, icon:'📅'},
+        {label:'Next Week', days:7, icon:'📆'}
+      ]; 
+      return (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'flex-end',justifyContent:'center',zIndex:1000}} onClick={onClose}>
+          <div className="slideUp" style={{background:'var(--bg-card)',borderRadius:'20px 20px 0 0',width:'100%',maxWidth:'400px',padding:'24px',paddingBottom:'calc(24px + var(--safe-bottom))'}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'20px'}}>
+              <h3 style={{fontSize:'18px',fontWeight:'600'}}>Due Date</h3>
+              <button onClick={onClose} style={{background:'none',color:'var(--text-muted)'}}><Icons.X/></button>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}}>
+              {opts.map(opt => (
+                <button key={opt.label} onClick={() => onSelect(setDateAt(opt.days))} style={{padding:'16px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-primary)',textAlign:'left'}}>
+                  <div style={{fontSize:'20px',marginBottom:'4px'}}>{opt.icon}</div>
+                  <div style={{fontSize:'14px',fontWeight:'600'}}>{opt.label}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const AICoachResultModal = ({ result, onConfirm, onClose }) => {
+      if (!result) return null;
+      return (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.85)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,padding:'20px'}} onClick={onClose}>
+          <div className="slideUp" style={{background:'var(--bg-card)',borderRadius:'var(--radius-lg)',width:'100%',maxWidth:'420px',maxHeight:'80vh',overflow:'auto',padding:'24px'}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:'flex',alignItems:'center',gap:'12px',marginBottom:'20px'}}>
+              <div style={{width:'48px',height:'48px',borderRadius:'50%',background:'linear-gradient(135deg,var(--accent-purple),var(--accent-primary))',display:'flex',alignItems:'center',justifyContent:'center'}}><Icons.Brain s={24}/></div>
+              <div><h3 style={{fontSize:'18px',fontWeight:'600'}}>AI Coach Plan</h3></div>
+            </div>
+            {result.encouragement && (
+              <div style={{padding:'16px',background:'rgba(139,92,246,0.1)',borderRadius:'var(--radius-md)',marginBottom:'20px',borderLeft:'4px solid var(--accent-purple)'}}>
+                <p style={{fontSize:'15px',fontStyle:'italic',color:'var(--text-primary)'}}>{result.encouragement}</p>
+              </div>
+            )}
+            <div style={{display:'flex',flexDirection:'column',gap:'10px',marginBottom:'24px'}}>
+              {result.tasks?.map((task, i) => (
+                <div key={i} style={{padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)'}}>
+                  <div style={{fontWeight:'600',marginBottom:'6px'}}>{task.name}</div>
+                  <div style={{fontSize:'12px',color:'var(--accent-primary)',marginBottom:'8px'}}>📅 {task.deadline || 'Today'}</div>
+                  {task.chunks && <div style={{fontSize:'12px',color:'var(--text-muted)'}}>{task.chunks.map((s,j)=> <span key={j}>• {s}<br/></span>)}</div>}
+                </div>
+              ))}
+            </div>
+            <div style={{display:'flex',gap:'12px'}}>
+              <button onClick={onClose} style={{flex:1,padding:'14px',background:'var(--bg-elevated)',borderRadius:'var(--radius-md)',color:'var(--text-secondary)'}}>Cancel</button>
+              <button onClick={onConfirm} style={{flex:2,padding:'14px',background:'var(--accent-primary)',borderRadius:'var(--radius-md)',color:'white',fontWeight:'600'}}>Accept Plan</button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // --- MAIN APP ---
+    const App = () => {
+      const [tasks, setTasks] = useState([]);
+      const [inputMode, setInputMode] = useState('smart'); // simple, smart, coach
+      const [isRecording, setIsRecording] = useState(false);
+      const [isProcessing, setIsProcessing] = useState(false);
+      const [showConfetti, setShowConfetti] = useState(false);
+      const [editingDateId, setEditingDateId] = useState(null);
+      const [coachResult, setCoachResult] = useState(null);
+      
+      // Load/Save
+      useEffect(() => {
+        const saved = localStorage.getItem('neurodone_tasks');
+        if (saved) setTasks(JSON.parse(saved));
+      }, []);
+      useEffect(() => { localStorage.setItem('neurodone_tasks', JSON.stringify(tasks)); }, [tasks]);
+
+      // Voice Logic
+      const startListening = () => {
+        if (!('webkitSpeechRecognition' in window)) return alert('Voice not supported in this browser');
+        const recognition = new window.webkitSpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        
+        recognition.onstart = () => setIsRecording(true);
+        recognition.onend = () => setIsRecording(false);
+        recognition.onresult = async (event) => {
+          const text = event.results[0][0].transcript;
+          handleVoiceInput(text);
+        };
+        recognition.start();
+      };
+
+      const handleVoiceInput = async (text) => {
+        setIsProcessing(true);
+        if (inputMode === 'simple') {
+          setTasks(prev => [{id: generateId(), name: text.charAt(0).toUpperCase()+text.slice(1), deadline: setDateAt(0), completed:false, chunks:[]}, ...prev]);
+        } 
+        else if (inputMode === 'smart') {
+          const parsed = await GeminiAPI.parseVoiceInput(text);
+          const newTasks = parsed.map(p => ({
+            id: generateId(), 
+            name: p.name, 
+            deadline: p.deadline === 'tomorrow' ? setDateAt(1) : setDateAt(0),
+            completed: false, 
+            chunks: [] 
+          }));
+          setTasks(prev => [...newTasks, ...prev]);
+        }
+        else if (inputMode === 'coach') {
+          const res = await GeminiAPI.aiCoachSession(text);
+          if (res) setCoachResult(res);
+        }
+        setIsProcessing(false);
+      };
+
+      const generateChunksForTask = async (taskId, taskName) => {
+        // Optimistic UI update
+        const id = generateId();
+        const newChunks = await GeminiAPI.generateChunks(taskName);
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, chunks: newChunks } : t));
+      };
+
+      const toggleTask = (id) => {
+        setTasks(prev => prev.map(t => {
+          if (t.id === id) {
+            if (!t.completed) setShowConfetti(true);
+            return { ...t, completed: !t.completed };
+          }
+          return t;
+        }));
+      };
+
+      const toggleChunk = (taskId, chunkId) => {
+        setTasks(prev => prev.map(t => {
+          if (t.id !== taskId) return t;
+          return { ...t, chunks: t.chunks.map(c => c.id === chunkId ? {...c, completed: !c.completed} : c)};
+        }));
+      };
+
+      const confirmCoachPlan = () => {
+        if (!coachResult) return;
+        const newTasks = coachResult.tasks.map(t => ({
+          id: generateId(),
+          name: t.name,
+          deadline: t.deadline === 'tomorrow' ? setDateAt(1) : setDateAt(0),
+          completed: false,
+          chunks: t.chunks ? t.chunks.map(c => ({id: generateId(), name: c, completed: false})) : []
+        }));
+        setTasks(prev => [...newTasks, ...prev]);
+        setCoachResult(null);
+      };
+
+      // Sorting: Overdue -> Today -> Future -> Completed
+      const sortedTasks = useMemo(() => {
+        return [...tasks].sort((a, b) => {
+          if (a.completed !== b.completed) return a.completed ? 1 : -1;
+          return new Date(a.deadline) - new Date(b.deadline);
+        });
+      }, [tasks]);
+
+      return (
+        <>
+          <Celebration show={showConfetti} onDone={() => setShowConfetti(false)} />
+          
+          {/* Header */}
+          <div style={{padding:'20px 20px 10px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+            <h1 style={{fontSize:'24px', fontWeight:'800', letterSpacing:'-0.5px'}}>Neurodone</h1>
+            <div style={{width:'32px',height:'32px',borderRadius:'50%',background:'var(--bg-elevated)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+              <Icons.Brain/>
+            </div>
+          </div>
+
+          {/* Mode Switcher */}
+          <div style={{padding:'0 20px 20px'}}>
+            <div style={{background:'var(--bg-elevated)', padding:'4px', borderRadius:'12px', display:'flex'}}>
+              {['simple', 'smart', 'coach'].map(m => (
+                <button 
+                  key={m} 
+                  onClick={() => setInputMode(m)}
+                  style={{
+                    flex:1, 
+                    padding:'8px', 
+                    borderRadius:'8px', 
+                    fontSize:'13px', 
+                    fontWeight:'600',
+                    background: inputMode === m ? 'var(--bg-card)' : 'transparent',
+                    color: inputMode === m ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                    boxShadow: inputMode === m ? '0 2px 8px rgba(0,0,0,0.2)' : 'none',
+                    transition: 'all 0.2s',
+                    textTransform: 'capitalize'
+                  }}
+                >
+                  {m === 'coach' ? 'AI Coach' : m}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Task List */}
+          <div style={{flex:1, overflowY:'auto', padding:'0 20px 100px'}}>
+            {isProcessing && <AIThinking />}
+            
+            {sortedTasks.length === 0 && !isProcessing && (
+              <div style={{textAlign:'center', marginTop:'60px', opacity:0.5}}>
+                <div style={{fontSize:'40px', marginBottom:'10px'}}>🎯</div>
+                <p>No tasks yet.<br/>Tap the mic to start.</p>
+              </div>
+            )}
+
+            {sortedTasks.map(task => {
+              const deadline = getDeadlineDisplay(task.deadline);
+              return (
+                <div key={task.id} className="task-item" style={{marginBottom:'12px', background:'var(--bg-card)', borderRadius:'var(--radius-md)', overflow:'hidden', opacity: task.completed ? 0.6 : 1}}>
+                  {/* Main Card */}
+                  <div style={{padding:'16px', display:'flex', gap:'12px'}}>
+                    <button onClick={() => toggleTask(task.id)} style={{width:'24px', height:'24px', borderRadius:'6px', border:`2px solid ${task.completed ? 'var(--accent-success)' : 'var(--border-subtle)'}`, background: task.completed ? 'var(--accent-success)' : 'transparent', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--bg-main)', flexShrink:0}}>
+                      {task.completed && <Icons.Check s={14}/>}
+                    </button>
+                    
+                    <div style={{flex:1}}>
+                      <div style={{textDecoration: task.completed ? 'line-through' : 'none', fontSize:'16px', marginBottom:'4px'}}>{task.name}</div>
+                      <div style={{display:'flex',gap:'10px',alignItems:'center'}}>
+                         <button onClick={() => setEditingDateId(task.id)} style={{fontSize:'12px', color: deadline.color, display:'flex', alignItems:'center', gap:'4px', background:'rgba(255,255,255,0.05)', padding:'2px 6px', borderRadius:'4px'}}>
+                           {deadline.text}
+                         </button>
+                         {!task.chunks?.length && !task.completed && (
+                           <button onClick={() => generateChunksForTask(task.id, task.name)} style={{fontSize:'11px', color:'var(--accent-purple)', display:'flex', alignItems:'center', gap:'3px', background:'rgba(139,92,246,0.1)', padding:'2px 6px', borderRadius:'4px'}}>
+                             <Icons.Wand s={10}/> AI Plan
+                           </button>
+                         )}
+                      </div>
+                    </div>
+
+                    <button onClick={() => setTasks(p => p.filter(t => t.id !== task.id))} style={{color:'var(--text-muted)', opacity:0.5}}><Icons.X s={18}/></button>
+                  </div>
+
+                  {/* Chunks */}
+                  {task.chunks && task.chunks.length > 0 && !task.completed && (
+                    <div style={{background:'var(--bg-elevated)', padding:'8px 16px 16px', borderTop:'1px solid var(--border-subtle)'}}>
+                      <div style={{fontSize:'11px', fontWeight:'700', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'8px', letterSpacing:'0.5px'}}>Micro-steps</div>
+                      {task.chunks.map(chunk => (
+                        <div key={chunk.id} onClick={() => toggleChunk(task.id, chunk.id)} style={{display:'flex', alignItems:'center', gap:'10px', padding:'6px 0', opacity: chunk.completed ? 0.5 : 1, cursor:'pointer'}}>
+                          <div style={{width:'6px', height:'6px', borderRadius:'50%', background: chunk.completed ? 'var(--accent-success)' : 'var(--text-muted)'}} />
+                          <span style={{fontSize:'13px', textDecoration: chunk.completed ? 'line-through' : 'none'}}>{chunk.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Floating Action Button */}
+          <div style={{position:'fixed', bottom:'30px', left:'50%', transform:'translateX(-50%)', zIndex:100}}>
+            <button 
+              onClick={startListening}
+              className={isRecording ? 'pulse' : ''}
+              style={{
+                width:'64px', height:'64px', borderRadius:'50%',
+                background: isRecording ? 'var(--accent-danger)' : 'var(--accent-primary)',
+                color: 'white',
+                boxShadow: '0 8px 32px rgba(99,102,241,0.4)',
+                display:'flex', alignItems:'center', justifyContent:'center',
+                transition: 'all 0.3s'
+              }}
+            >
+              <Icons.Mic s={28}/>
+            </button>
+          </div>
+
+          {/* Modals */}
+          {editingDateId && (
+            <DeadlinePicker 
+              onSelect={(date) => {
+                setTasks(prev => prev.map(t => t.id === editingDateId ? {...t, deadline: date} : t));
+                setEditingDateId(null);
+              }}
+              onClose={() => setEditingDateId(null)}
+            />
+          )}
+
+          <AICoachResultModal 
+            result={coachResult} 
+            onConfirm={confirmCoachPlan} 
+            onClose={() => setCoachResult(null)} 
+          />
+
+        </>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

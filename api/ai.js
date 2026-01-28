@@ -13,127 +13,72 @@ export default async function handler(req, res) {
   const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
   if (!GEMINI_API_KEY) return res.status(500).json({ error: 'API key not configured' });
 
-  const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+  // Using gemini-3-flash-preview (latest available)
+  const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
 
   try {
     const { action, data } = req.body;
     
-    let systemInstruction = "";
-    let userPrompt = "";
+    let prompt = "";
 
     // =========================================
     // MODE 1: GENERATE CHUNKS (task → micro-steps)
     // =========================================
     if (action === 'generateChunks') {
-      systemInstruction = `You are an ADHD productivity coach. Break tasks into 3-4 tiny, specific micro-steps.
+      prompt = `You are an ADHD productivity coach. Break this task into 3-4 tiny, specific micro-steps.
 
 RULES:
-1. First step must take under 2 minutes (e.g., "Open phone", "Find contact")
-2. Use physical action verbs: Open, Click, Write, Pick up, Walk to
-3. Include the actual task details in steps (not generic)
+1. First step must take under 2 minutes
+2. Use physical action verbs: Open, Click, Write, Pick up
+3. Include actual task details in steps (not generic)
 4. Last step should feel satisfying
 
-EXAMPLES:
-Task: "Call Dave about project"
-Output: ["Open phone contacts", "Find Dave's number", "Call and discuss project", "Send follow-up text"]
+Task: "${data.taskName}"
 
-Task: "Buy groceries at Lidl"  
-Output: ["Write list on phone (5 items)", "Drive to Lidl", "Grab items from list", "Self-checkout done!"]
+Respond with ONLY a JSON array of strings like this example:
+["Step 1", "Step 2", "Step 3"]
 
-Task: "Do laundry"
-Output: ["Gather dirty clothes in basket", "Put in washing machine + detergent", "Set timer for 45 min", "Move to dryer when done"]
-
-Return ONLY a JSON array of strings, nothing else.`;
-
-      userPrompt = `Break this task into micro-steps: "${data.taskName}"`;
+JSON array:`;
     }
 
     // =========================================
     // MODE 2: PARSE VOICE (transcript → task list)
     // =========================================
     else if (action === 'parseVoice') {
-      systemInstruction = `You are a task extraction engine. Extract SEPARATE tasks from voice input.
+      prompt = `You are a task extraction engine. Extract SEPARATE tasks from this voice input.
 
-CRITICAL RULES:
-1. Split on "and", "also", "then", "plus" - each becomes SEPARATE task
-2. Remove filler: "I need to", "um", "like", "so", "hey"
+RULES:
+1. Split on "and", "also", "then" - each becomes SEPARATE task
+2. Remove filler words like "I need to", "um", "like"
 3. Keep task names SHORT (2-6 words)
-4. Extract deadlines: today, tomorrow, monday, tuesday, etc.
-5. Default deadline is "today" if not mentioned
+4. Extract deadlines: today, tomorrow, monday, saturday, etc.
+5. If no deadline mentioned, use "today"
 
-EXAMPLES:
+Voice input: "${data.transcript}"
 
-Input: "I need to call David tomorrow and go to Lidl for grocery shopping today and do laundry on Saturday"
-Output: [
-  {"name": "Call David", "deadline": "tomorrow"},
-  {"name": "Go to Lidl for groceries", "deadline": "today"},
-  {"name": "Do laundry", "deadline": "saturday"}
-]
+Respond with ONLY a JSON array like this example:
+[{"name": "Call Dave", "deadline": "tomorrow"}, {"name": "Buy milk", "deadline": "today"}]
 
-Input: "um call mom and also buy milk and finish the report by friday"
-Output: [
-  {"name": "Call mom", "deadline": "today"},
-  {"name": "Buy milk", "deadline": "today"},
-  {"name": "Finish the report", "deadline": "friday"}
-]
-
-Input: "I need to create marketing strategy tomorrow and call Dave and go grocery shopping today"
-Output: [
-  {"name": "Create marketing strategy", "deadline": "tomorrow"},
-  {"name": "Call Dave", "deadline": "today"},
-  {"name": "Go grocery shopping", "deadline": "today"}
-]
-
-Return ONLY a JSON array, nothing else.`;
-
-      userPrompt = `Extract tasks from: "${data.transcript}"`;
+JSON array:`;
     }
 
     // =========================================
     // MODE 3: AI COACH (brain dump → organized plan)
     // =========================================
     else if (action === 'coachSession') {
-      systemInstruction = `You are an empathetic ADHD coach helping someone organize their overwhelmed thoughts.
+      prompt = `You are an empathetic ADHD coach. Help organize this brain dump.
 
-YOUR JOB:
-1. Write a brief encouraging message (1 sentence, warm tone)
-2. Extract ALL tasks mentioned (even vague ones)
-3. For each task: clean name, realistic deadline, 3 micro-steps
-4. Deadline clues: "urgent/asap" = today, "soon" = tomorrow, "eventually" = next week
+Brain dump: "${data.transcript}"
 
-EXAMPLE:
-
-Input: "I'm so overwhelmed I need to call Dave about the project and my room is a mess and I should email the client and groceries"
-
-Output: {
-  "encouragement": "I hear you - let's break this down together, one tiny step at a time!",
+Respond with ONLY valid JSON in this exact format:
+{
+  "encouragement": "One short encouraging sentence",
   "tasks": [
-    {
-      "name": "Call Dave about project",
-      "deadline": "today",
-      "chunks": ["Find Dave's number", "Write 2 bullet points to discuss", "Make the call"]
-    },
-    {
-      "name": "Clean room",
-      "deadline": "today",
-      "chunks": ["Set 10-min timer", "Pick up clothes only", "Clear desk surface"]
-    },
-    {
-      "name": "Email the client",
-      "deadline": "tomorrow",
-      "chunks": ["Open email, hit compose", "Write 3 sentences max", "Send it!"]
-    },
-    {
-      "name": "Buy groceries",
-      "deadline": "today",
-      "chunks": ["Make list (5 items)", "Go to store", "Grab items + one treat"]
-    }
+    {"name": "Task name", "deadline": "today", "chunks": ["Step 1", "Step 2", "Step 3"]}
   ]
 }
 
-Return ONLY valid JSON, nothing else.`;
-
-      userPrompt = `Help me organize this brain dump: "${data.transcript}"`;
+JSON:`;
     } 
     else {
       return res.status(400).json({ error: 'Invalid action' });
@@ -147,16 +92,11 @@ Return ONLY valid JSON, nothing else.`;
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{
-          role: "user",
-          parts: [
-            { text: systemInstruction },
-            { text: userPrompt }
-          ]
+          parts: [{ text: prompt }]
         }],
         generationConfig: {
-          temperature: 0.2,
-          maxOutputTokens: 1500,
-          responseMimeType: "application/json"
+          temperature: 0.1,
+          maxOutputTokens: 1500
         }
       })
     });
@@ -170,25 +110,25 @@ Return ONLY valid JSON, nothing else.`;
     const result = await response.json();
     const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
 
-    console.log(`[${action}] Raw response:`, rawText);
+    console.log(`[${action}] Raw:`, rawText);
 
     if (!rawText) {
       return res.status(500).json({ error: 'Empty AI response' });
     }
 
-    // Parse JSON (should be clean due to responseMimeType)
+    // Parse JSON from response
     let parsedData;
     try {
-      parsedData = JSON.parse(rawText);
-    } catch (e) {
-      // Fallback: try cleaning markdown
-      const cleanText = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-      try {
-        parsedData = JSON.parse(cleanText);
-      } catch (e2) {
-        console.error('Parse failed:', e2, 'Raw:', rawText);
-        return res.status(500).json({ error: 'Failed to parse AI response', raw: rawText });
+      // Find JSON in the response
+      const jsonMatch = rawText.match(/[\[{][\s\S]*[\]}]/);
+      if (jsonMatch) {
+        parsedData = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error('No JSON found');
       }
+    } catch (e) {
+      console.error('Parse error:', e, 'Raw:', rawText);
+      return res.status(500).json({ error: 'Failed to parse AI response', raw: rawText });
     }
 
     console.log(`[${action}] Parsed:`, parsedData);

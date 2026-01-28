@@ -1,15 +1,86 @@
 // Vercel Serverless Function - Gemini AI Proxy
 // FIXED VERSION for Neurodone.app
 
+const { createClient } = require('@supabase/supabase-js');
+
+// Rate limit: 50 calls per day per user
+const RATE_LIMIT_MAX = 50;
+
 export default async function handler(req, res) {
   // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+  // =========================================
+  // AUTHENTICATION
+  // =========================================
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Missing or invalid authorization token' });
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseServiceKey) {
+    return res.status(500).json({ error: 'Supabase not configured' });
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+  // Verify the token
+  const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+  if (authError || !user) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+
+  // =========================================
+  // RATE LIMITING (50 calls/day per user)
+  // =========================================
+  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  const rateLimitKey = `${user.id}:${today}`;
+
+  // Check current usage
+  const { data: rateLimitData, error: rateLimitError } = await supabase
+    .from('rate_limits')
+    .select('count')
+    .eq('user_date', rateLimitKey)
+    .single();
+
+  const currentCount = rateLimitData?.count || 0;
+
+  if (currentCount >= RATE_LIMIT_MAX) {
+    return res.status(429).json({
+      error: 'Rate limit exceeded',
+      message: `You have reached the limit of ${RATE_LIMIT_MAX} AI calls per day. Try again tomorrow.`,
+      limit: RATE_LIMIT_MAX,
+      used: currentCount
+    });
+  }
+
+  // Increment counter (upsert)
+  const { error: upsertError } = await supabase
+    .from('rate_limits')
+    .upsert(
+      { user_date: rateLimitKey, user_id: user.id, count: currentCount + 1, updated_at: new Date().toISOString() },
+      { onConflict: 'user_date' }
+    );
+
+  if (upsertError) {
+    console.error('Rate limit upsert error:', upsertError);
+    // Continue anyway - don't block user due to rate limit tracking error
+  }
+
+  // =========================================
+  // AI LOGIC CONTINUES
+  // =========================================
   const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
   if (!GEMINI_API_KEY) return res.status(500).json({ error: 'API key not configured' });
 

@@ -206,13 +206,14 @@
           setAiMessage('✨ Parsing tasks...');
           const parsed = await GeminiAPI.parseVoiceInput(transcript);
           GeminiAPI.logInteraction({ mode: 'smart', transcript }, parsed);
-          const tasks = [];
-          for (let i = 0; i < parsed.length; i++) {
-            const p = parsed[i];
-            setAiMessage(`Creating ${i + 1}/${parsed.length}: ${p.name.substring(0, 25)}...`);
+
+          // Generate all chunks in PARALLEL (much faster!)
+          setAiMessage(`Creating ${parsed.length} tasks...`);
+          const tasks = await Promise.all(parsed.map(async (p) => {
             const chunks = await GeminiAPI.generateChunks(p.name);
-            tasks.push({ id: generateId(), name: p.name, project: SmartParser.extractProject(p.name, projects), deadline: deadlineFromText(p.deadline), chunks, completed: false, createdAt: new Date().toISOString(), aiGenerated: true });
-          }
+            return { id: generateId(), name: p.name, project: SmartParser.extractProject(p.name, projects), deadline: deadlineFromText(p.deadline), chunks, completed: false, createdAt: new Date().toISOString(), aiGenerated: true };
+          }));
+
           console.log('Created tasks:', tasks);
           onTasksCreated(tasks);
         } else {

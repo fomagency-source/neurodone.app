@@ -2,7 +2,9 @@
   "version": 2,
   "rewrites": [
     { "source": "/", "destination": "/landing.html" },
-    { "source": "/app", "destination": "/app.html" }
+    { "source": "/app", "destination": "/app.html" },
+    { "source": "/login", "destination": "/login.html" },
+    { "source": "/signup", "destination": "/signup.html" }
   ],
   "headers": [
     {
